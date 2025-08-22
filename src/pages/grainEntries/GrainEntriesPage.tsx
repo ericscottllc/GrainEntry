@@ -82,24 +82,31 @@ export const GrainEntriesPage: React.FC = () => {
 
   // Auto-populate months and years when start month/year changes
   useEffect(() => {
-    if (startMonth && startYear) {
+    // Auto-populate based on first column that has both month and year
+    const firstValidIndex = entryMonths.findIndex((month, index) => month && entryYears[index]);
+    if (firstValidIndex !== -1) {
+      const startMonth = entryMonths[firstValidIndex];
+      const startYear = entryYears[firstValidIndex];
       const monthIndex = MONTHS.indexOf(startMonth);
+      
       if (monthIndex !== -1) {
-        const newMonths = [startMonth];
-        const newYears = [startYear];
+        const newMonths = [...entryMonths];
+        const newYears = [...entryYears];
         
-        for (let i = 1; i < 6; i++) {
-          const nextMonthIndex = (monthIndex + i) % 12;
-          const yearIncrement = Math.floor((monthIndex + i) / 12);
-          newMonths.push(MONTHS[nextMonthIndex]);
-          newYears.push(startYear + yearIncrement);
+        // Fill subsequent columns
+        for (let i = firstValidIndex + 1; i < 6; i++) {
+          const monthsFromStart = i - firstValidIndex;
+          const nextMonthIndex = (monthIndex + monthsFromStart) % 12;
+          const yearIncrement = Math.floor((monthIndex + monthsFromStart) / 12);
+          newMonths[i] = MONTHS[nextMonthIndex];
+          newYears[i] = startYear + yearIncrement;
         }
         
         setEntryMonths(newMonths);
         setEntryYears(newYears);
       }
     }
-  }, [startMonth, startYear]);
+  }, [entryMonths, entryYears]);
 
   const handleSearch = () => {
     setAppliedFilters(filters);
@@ -148,12 +155,22 @@ export const GrainEntriesPage: React.FC = () => {
     const newMonths = [...entryMonths];
     newMonths[index] = value;
     setEntryMonths(newMonths);
+    
+    // Trigger auto-population if this creates a valid starting point
+    if (value && entryYears[index]) {
+      // The useEffect will handle the auto-population
+    }
   };
 
   const updateEntryYear = (index: number, value: number) => {
     const newYears = [...entryYears];
     newYears[index] = value;
     setEntryYears(newYears);
+    
+    // Trigger auto-population if this creates a valid starting point
+    if (value && entryMonths[index]) {
+      // The useEffect will handle the auto-population
+    }
   };
 
   const updateEntryFutures = (index: number, value: string) => {
@@ -255,8 +272,6 @@ export const GrainEntriesPage: React.FC = () => {
       // Clear form
       setEntryDate(new Date().toISOString().split('T')[0]);
       setEntryCrop('');
-      setStartYear(new Date().getFullYear());
-      setStartMonth('');
       setEntryMonths(['', '', '', '', '', '']);
       setEntryYears([0, 0, 0, 0, 0, 0]);
       setEntryFutures(['', '', '', '', '', '']);
@@ -334,43 +349,40 @@ export const GrainEntriesPage: React.FC = () => {
                 ))}
               </select>
             </div>
-            <div>
-              <label className="block text-xs font-medium text-gray-700 mb-1">Start Year</label>
-              <input
-                type="number"
-                value={startYear}
-                onChange={(e) => setStartYear(parseInt(e.target.value) || new Date().getFullYear())}
-                className="w-full px-2 py-1 border border-gray-300 text-sm focus:outline-none focus:border-blue-500"
-                min="2020"
-                max="2030"
-              />
-            </div>
-            <div>
-              <label className="block text-xs font-medium text-gray-700 mb-1">Start Month</label>
-              <select
-                value={startMonth}
-                onChange={(e) => setStartMonth(e.target.value)}
-                className="w-full px-2 py-1 border border-gray-300 text-sm focus:outline-none focus:border-blue-500"
-              >
-                <option value="">Select Month</option>
-                {MONTHS.map(month => (
-                  <option key={month} value={month}>{month}</option>
-                ))}
-              </select>
-            </div>
+            <div></div>
+            <div></div>
           </div>
         </div>
         
         {/* Spreadsheet-like Table */}
         <div className="overflow-x-auto">
           <table className="w-full border-collapse min-w-[1200px]">
-            {/* Month Headers */}
+            {/* Year Headers */}
             <thead>
               <tr className="bg-blue-50">
-                <th className="border border-gray-300 px-2 py-2 text-xs font-medium text-gray-700 w-32">Elevator</th>
-                <th className="border border-gray-300 px-2 py-2 text-xs font-medium text-gray-700 w-32">Town</th>
+                <th className="border border-gray-300 px-2 py-2 text-xs font-medium text-gray-700 w-32"></th>
+                <th className="border border-gray-300 px-2 py-2 text-xs font-medium text-gray-700 w-32"></th>
                 {Array.from({ length: 6 }, (_, index) => (
                   <th key={index} className="border border-gray-300 px-2 py-2 text-xs font-medium text-gray-700 w-24">
+                    <input
+                      type="number"
+                      value={entryYears[index] || ''}
+                      onChange={(e) => updateEntryYear(index, parseInt(e.target.value) || 0)}
+                      className="w-full px-1 py-0.5 border-0 bg-transparent text-xs font-medium text-center focus:outline-none focus:bg-white focus:border focus:border-blue-500"
+                      placeholder="Year"
+                      min="2020"
+                      max="2030"
+                    />
+                  </th>
+                ))}
+                <th className="border border-gray-300 px-1 py-2 text-xs font-medium text-gray-700 w-8"></th>
+              </tr>
+              {/* Month Headers */}
+              <tr className="bg-blue-50">
+                <th className="border border-gray-300 px-2 py-1 text-xs font-medium text-gray-700"></th>
+                <th className="border border-gray-300 px-2 py-1 text-xs font-medium text-gray-700"></th>
+                {Array.from({ length: 6 }, (_, index) => (
+                  <th key={index} className="border border-gray-300 px-2 py-1 text-xs font-medium text-gray-700">
                     <select
                       value={entryMonths[index]}
                       onChange={(e) => updateEntryMonth(index, e.target.value)}
@@ -383,33 +395,25 @@ export const GrainEntriesPage: React.FC = () => {
                     </select>
                   </th>
                 ))}
-                <th className="border border-gray-300 px-1 py-2 text-xs font-medium text-gray-700 w-8"></th>
-              </tr>
-              {/* Year Headers */}
-              <tr className="bg-blue-50">
-                <th className="border border-gray-300 px-2 py-1 text-xs font-medium text-gray-700"></th>
-                <th className="border border-gray-300 px-2 py-1 text-xs font-medium text-gray-700"></th>
-                {Array.from({ length: 6 }, (_, index) => (
-                  <th key={index} className="border border-gray-300 px-2 py-1 text-xs font-medium text-gray-700">
-                    <input
-                      type="number"
-                      value={entryYears[index] || ''}
-                      onChange={(e) => updateEntryYear(index, parseInt(e.target.value) || 0)}
-                      className="w-full px-1 py-0.5 border-0 bg-transparent text-xs font-medium text-center focus:outline-none focus:bg-white focus:border focus:border-blue-500"
-                      placeholder="Year"
-                      min="2020"
-                      max="2030"
-                    />
-                  </th>
-                ))}
                 <th className="border border-gray-300 px-1 py-1 text-xs font-medium text-gray-700"></th>
               </tr>
-              {/* Futures Row */}
-              <tr className="bg-yellow-50">
-                <th className="border border-gray-300 px-2 py-2 text-xs font-medium text-gray-700">Futures Prices</th>
-                <th className="border border-gray-300 px-2 py-2 text-xs font-medium text-gray-700"></th>
+              {/* Futures Prices Row */}
+              <tr className="bg-blue-50">
+                <th className="border border-gray-300 px-2 py-2 text-xs font-medium text-gray-700">Elevator</th>
+                <th className="border border-gray-300 px-2 py-2 text-xs font-medium text-gray-700">Town</th>
                 {Array.from({ length: 6 }, (_, index) => (
                   <th key={index} className="border border-gray-300 px-2 py-2 text-xs font-medium text-gray-700">
+                    Futures Price
+                  </th>
+                ))}
+                <th className="border border-gray-300 px-1 py-2 text-xs font-medium text-gray-700"></th>
+              </tr>
+              {/* Futures Input Row */}
+              <tr className="bg-yellow-50">
+                <td className="border border-gray-300 px-2 py-2 text-xs font-medium text-gray-700 bg-gray-100">Futures</td>
+                <td className="border border-gray-300 px-2 py-2 text-xs font-medium text-gray-700 bg-gray-100">Prices</td>
+                {Array.from({ length: 6 }, (_, index) => (
+                  <td key={index} className="border border-gray-300 px-2 py-2 text-xs font-medium text-gray-700">
                     <input
                       type="number"
                       step="0.01"
@@ -418,9 +422,9 @@ export const GrainEntriesPage: React.FC = () => {
                       className="w-full px-1 py-1 border-0 bg-transparent text-xs text-right focus:outline-none focus:bg-white focus:border focus:border-blue-500"
                       placeholder="0.00"
                     />
-                  </th>
+                  </td>
                 ))}
-                <th className="border border-gray-300 px-1 py-2 text-xs font-medium text-gray-700"></th>
+                <td className="border border-gray-300 px-1 py-2 text-xs font-medium text-gray-700"></td>
               </tr>
             </thead>
             
