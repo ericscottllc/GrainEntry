@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Search, Save, Trash2, ArrowUpDown, Plus } from 'lucide-react';
 import {
   listEntries, listCropClasses, listRegions, listRegionAssociations, listElevators, listTowns,
-  insertEntries, softDeleteEntry,
+  insertEntries, softDeleteEntry, listRegionsByClass,
   type GrainEntry, type GrainEntryInsert, type GrainEntryFilters, type SortConfig,
   type CropClass, type MasterRegion, type RegionAssociation
 } from '../../lib/grainEntryQueries';
@@ -25,6 +25,7 @@ export const GrainEntriesPage: React.FC = () => {
   const [entries, setEntries] = useState<GrainEntry[]>([]);
   const [cropClasses, setCropClasses] = useState<CropClass[]>([]);
   const [regions, setRegions] = useState<MasterRegion[]>([]);
+  const [filteredRegions, setFilteredRegions] = useState<MasterRegion[]>([]);
   const [regionAssociations, setRegionAssociations] = useState<RegionAssociation[]>([]);
   const [elevators, setElevators] = useState<any[]>([]);
   const [towns, setTowns] = useState<any[]>([]);
@@ -80,10 +81,10 @@ export const GrainEntriesPage: React.FC = () => {
 
   useEffect(() => {
     loadData();
-    loadRegions();
+    loadAllRegions();
   }, [appliedFilters, appliedSort]);
 
-  const loadRegions = async () => {
+  const loadAllRegions = async () => {
     try {
       const regionsData = await listRegions();
       setRegions(regionsData);
@@ -92,10 +93,34 @@ export const GrainEntriesPage: React.FC = () => {
     }
   };
 
-  // Load region associations when region or crop class changes
+  // Load filtered regions when crop class changes
+  useEffect(() => {
+    if (entryCropClass) {
+      loadFilteredRegions();
+    } else {
+      setFilteredRegions([]);
+      setEntryRegion('');
+    }
+  }, [entryCropClass]);
+
+  const loadFilteredRegions = async () => {
+    try {
+      const regionsData = await listRegionsByClass(entryCropClass);
+      setFilteredRegions(regionsData);
+    } catch (error) {
+      console.error('Failed to load filtered regions:', error);
+      setFilteredRegions([]);
+    }
+  };
+
+  // Load region associations when region and crop class changes
   useEffect(() => {
     if (entryRegion && entryCropClass) {
-      loadRegionAssociations();
+      if (entryRegion === 'all') {
+        loadAllRegionAssociations();
+      } else {
+        loadRegionAssociations();
+      }
     }
   }, [entryRegion, entryCropClass]);
 
@@ -125,6 +150,35 @@ export const GrainEntriesPage: React.FC = () => {
       }
     } catch (error) {
       console.error('Failed to load region associations:', error);
+    }
+  };
+
+  const loadAllRegionAssociations = async () => {
+    try {
+      const associations = await listRegionAssociations(undefined, entryCropClass);
+      setRegionAssociations(associations);
+      
+      // Auto-populate rows based on all region associations for this crop class
+      if (associations.length > 0) {
+        const newRows = associations.map((assoc, index) => ({
+          id: `all-regions-${index}`,
+          elevator_id: assoc.elevator_id,
+          town_id: assoc.town_id,
+          cash_prices: ['', '', '', '', '', '']
+        }));
+        
+        // Add one empty row at the end
+        newRows.push({
+          id: Date.now().toString(),
+          elevator_id: '',
+          town_id: '',
+          cash_prices: ['', '', '', '', '', '']
+        });
+        
+        setEntryRows(newRows);
+      }
+    } catch (error) {
+      console.error('Failed to load all region associations:', error);
     }
   };
 
@@ -406,10 +460,14 @@ export const GrainEntriesPage: React.FC = () => {
               <select
                 value={entryRegion}
                 onChange={(e) => setEntryRegion(e.target.value)}
+                disabled={!entryCropClass}
                 className="w-full px-2 py-1 border border-gray-300 text-sm focus:outline-none focus:border-blue-500"
               >
-                <option value="">Select Region</option>
-                {regions.map(region => (
+                <option value="">{entryCropClass ? 'Select Region' : 'Select Crop Class First'}</option>
+                {entryCropClass && filteredRegions.length > 0 && (
+                  <option value="all">All Regions</option>
+                )}
+                {filteredRegions.map(region => (
                   <option key={region.id} value={region.id}>{region.name}</option>
                 ))}
               </select>
@@ -559,7 +617,9 @@ export const GrainEntriesPage: React.FC = () => {
               Add Row
             </button>
             <div className="text-xs text-gray-600">
-              {entryRegion ? 'Region pre-populated rows. ' : ''}Rows auto-add when you enter data. Use Tab to navigate quickly.
+              {entryRegion === 'all' ? 'All regions pre-populated. ' : 
+               entryRegion ? 'Region pre-populated rows. ' : ''}
+              Rows auto-add when you enter data. Use Tab to navigate quickly.
             </div>
           </div>
           <button
