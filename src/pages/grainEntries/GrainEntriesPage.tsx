@@ -1,9 +1,10 @@
 import React, { useState, useEffect } from 'react';
 import { Search, Save, Trash2, ArrowUpDown, Plus } from 'lucide-react';
 import {
-  listEntries, listCrops, listElevators, listTowns,
+  listEntries, listCropClasses, listRegions, listRegionAssociations, listElevators, listTowns,
   insertEntries, softDeleteEntry,
-  type GrainEntry, type GrainEntryInsert, type GrainEntryFilters, type SortConfig
+  type GrainEntry, type GrainEntryInsert, type GrainEntryFilters, type SortConfig,
+  type CropClass, type MasterRegion, type RegionAssociation
 } from '../../lib/grainEntryQueries';
 
 interface Toast {
@@ -22,7 +23,9 @@ const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', '
 
 export const GrainEntriesPage: React.FC = () => {
   const [entries, setEntries] = useState<GrainEntry[]>([]);
-  const [crops, setCrops] = useState<any[]>([]);
+  const [cropClasses, setCropClasses] = useState<CropClass[]>([]);
+  const [regions, setRegions] = useState<MasterRegion[]>([]);
+  const [regionAssociations, setRegionAssociations] = useState<RegionAssociation[]>([]);
   const [elevators, setElevators] = useState<any[]>([]);
   const [towns, setTowns] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -40,9 +43,8 @@ export const GrainEntriesPage: React.FC = () => {
   
   // Entry form state - simplified
   const [entryDate, setEntryDate] = useState(new Date().toISOString().split('T')[0]);
-  const [entryCrop, setEntryCrop] = useState('');
-  const [startYear, setStartYear] = useState(new Date().getFullYear());
-  const [startMonth, setStartMonth] = useState('');
+  const [entryCropClass, setEntryCropClass] = useState('');
+  const [entryRegion, setEntryRegion] = useState('');
   const [entryMonths, setEntryMonths] = useState<string[]>(['', '', '', '', '', '']);
   const [entryYears, setEntryYears] = useState<number[]>([0, 0, 0, 0, 0, 0]);
   const [entryFutures, setEntryFutures] = useState<string[]>(['', '', '', '', '', '']);
@@ -60,13 +62,13 @@ export const GrainEntriesPage: React.FC = () => {
       setLoading(true);
       const [entriesData, cropsData, elevatorsData, townsData] = await Promise.all([
         listEntries(appliedFilters, appliedSort),
-        listCrops(),
+        listCropClasses(),
         listElevators(),
         listTowns()
       ]);
       
       setEntries(entriesData);
-      setCrops(cropsData);
+      setCropClasses(cropsData);
       setElevators(elevatorsData);
       setTowns(townsData);
     } catch (error) {
@@ -78,7 +80,53 @@ export const GrainEntriesPage: React.FC = () => {
 
   useEffect(() => {
     loadData();
+    loadRegions();
   }, [appliedFilters, appliedSort]);
+
+  const loadRegions = async () => {
+    try {
+      const regionsData = await listRegions();
+      setRegions(regionsData);
+    } catch (error) {
+      console.error('Failed to load regions:', error);
+    }
+  };
+
+  // Load region associations when region or crop class changes
+  useEffect(() => {
+    if (entryRegion && entryCropClass) {
+      loadRegionAssociations();
+    }
+  }, [entryRegion, entryCropClass]);
+
+  const loadRegionAssociations = async () => {
+    try {
+      const associations = await listRegionAssociations(entryRegion, entryCropClass);
+      setRegionAssociations(associations);
+      
+      // Auto-populate rows based on region associations
+      if (associations.length > 0) {
+        const newRows = associations.map((assoc, index) => ({
+          id: `region-${index}`,
+          elevator_id: assoc.elevator_id,
+          town_id: assoc.town_id,
+          cash_prices: ['', '', '', '', '', '']
+        }));
+        
+        // Add one empty row at the end
+        newRows.push({
+          id: Date.now().toString(),
+          elevator_id: '',
+          town_id: '',
+          cash_prices: ['', '', '', '', '', '']
+        });
+        
+        setEntryRows(newRows);
+      }
+    } catch (error) {
+      console.error('Failed to load region associations:', error);
+    }
+  };
 
   // Auto-populate months and years when start month/year changes
   useEffect(() => {
@@ -250,7 +298,7 @@ export const GrainEntriesPage: React.FC = () => {
           
           entriesToInsert.push({
             date: entryDate,
-            crop_id: entryCrop,
+            class_id: entryCropClass,
             elevator_id: row.elevator_id,
             town_id: row.town_id,
             month,
@@ -271,7 +319,8 @@ export const GrainEntriesPage: React.FC = () => {
       
       // Clear form
       setEntryDate(new Date().toISOString().split('T')[0]);
-      setEntryCrop('');
+      setEntryCropClass('');
+      setEntryRegion('');
       setEntryMonths(['', '', '', '', '', '']);
       setEntryYears([0, 0, 0, 0, 0, 0]);
       setEntryFutures(['', '', '', '', '', '']);
@@ -288,7 +337,8 @@ export const GrainEntriesPage: React.FC = () => {
     if (!appliedSearchTerm) return true;
     const searchLower = appliedSearchTerm.toLowerCase();
     return (
-      entry.master_crops?.name.toLowerCase().includes(searchLower) ||
+      entry.crop_classes?.name.toLowerCase().includes(searchLower) ||
+      entry.crop_classes?.master_crops?.name.toLowerCase().includes(searchLower) ||
       entry.master_elevators?.name.toLowerCase().includes(searchLower) ||
       entry.master_towns?.name.toLowerCase().includes(searchLower) ||
       entry.month.toLowerCase().includes(searchLower) ||
@@ -337,19 +387,33 @@ export const GrainEntriesPage: React.FC = () => {
               />
             </div>
             <div>
-              <label className="block text-xs font-medium text-gray-700 mb-1">Crop</label>
+              <label className="block text-xs font-medium text-gray-700 mb-1">Crop Class</label>
               <select
-                value={entryCrop}
-                onChange={(e) => setEntryCrop(e.target.value)}
+                value={entryCropClass}
+                onChange={(e) => setEntryCropClass(e.target.value)}
                 className="w-full px-2 py-1 border border-gray-300 text-sm focus:outline-none focus:border-blue-500"
               >
-                <option value="">Select Crop</option>
-                {crops.map(crop => (
-                  <option key={crop.id} value={crop.id}>{crop.name}</option>
+                <option value="">Select Crop Class</option>
+                {cropClasses.map(cropClass => (
+                  <option key={cropClass.id} value={cropClass.id}>
+                    {cropClass.master_crops?.name} - {cropClass.name}
+                  </option>
                 ))}
               </select>
             </div>
-            <div></div>
+            <div>
+              <label className="block text-xs font-medium text-gray-700 mb-1">Region (Optional)</label>
+              <select
+                value={entryRegion}
+                onChange={(e) => setEntryRegion(e.target.value)}
+                className="w-full px-2 py-1 border border-gray-300 text-sm focus:outline-none focus:border-blue-500"
+              >
+                <option value="">Select Region</option>
+                {regions.map(region => (
+                  <option key={region.id} value={region.id}>{region.name}</option>
+                ))}
+              </select>
+            </div>
             <div></div>
           </div>
         </div>
@@ -495,12 +559,12 @@ export const GrainEntriesPage: React.FC = () => {
               Add Row
             </button>
             <div className="text-xs text-gray-600">
-              Rows auto-add when you enter data. Use Tab to navigate quickly.
+              {entryRegion ? 'Region pre-populated rows. ' : ''}Rows auto-add when you enter data. Use Tab to navigate quickly.
             </div>
           </div>
           <button
             onClick={handleSaveEntries}
-            disabled={!entryDate || !entryCrop}
+            disabled={!entryDate || !entryCropClass}
             className="flex items-center px-4 py-2 bg-tg-primary text-gray-900 hover:bg-opacity-80 disabled:opacity-50 disabled:cursor-not-allowed font-medium text-sm"
           >
             <Save className="h-4 w-4 mr-2" />
@@ -527,15 +591,17 @@ export const GrainEntriesPage: React.FC = () => {
           </div>
           
           <div>
-            <label className="block text-xs font-medium text-gray-700 mb-1">Crop</label>
+            <label className="block text-xs font-medium text-gray-700 mb-1">Crop Class</label>
             <select
-              value={filters.crop_id || ''}
-              onChange={(e) => handleFilterChange('crop_id', e.target.value)}
+              value={filters.class_id || ''}
+              onChange={(e) => handleFilterChange('class_id', e.target.value)}
               className="w-full px-2 py-1 border border-gray-300 text-xs focus:outline-none focus:border-blue-500"
             >
-              <option value="">All Crops</option>
-              {crops.map(crop => (
-                <option key={crop.id} value={crop.id}>{crop.name}</option>
+              <option value="">All Crop Classes</option>
+              {cropClasses.map(cropClass => (
+                <option key={cropClass.id} value={cropClass.id}>
+                  {cropClass.master_crops?.name} - {cropClass.name}
+                </option>
               ))}
             </select>
           </div>
@@ -600,10 +666,10 @@ export const GrainEntriesPage: React.FC = () => {
                 </th>
                 <th 
                   className="border border-gray-300 px-3 py-2 text-left text-xs font-medium text-gray-700 cursor-pointer hover:bg-gray-100"
-                  onClick={() => handleSort('master_crops.name')}
+                  onClick={() => handleSort('crop_classes.name')}
                 >
                   <div className="flex items-center">
-                    Crop
+                    Crop Class
                     <ArrowUpDown className="ml-1 h-3 w-3" />
                   </div>
                 </th>
@@ -637,7 +703,7 @@ export const GrainEntriesPage: React.FC = () => {
                     {new Date(entry.date).toLocaleDateString()}
                   </td>
                   <td className="border border-gray-300 px-3 py-2 text-xs text-gray-900">
-                    {entry.master_crops?.name}
+                    {entry.crop_classes?.master_crops?.name} - {entry.crop_classes?.name}
                   </td>
                   <td className="border border-gray-300 px-3 py-2 text-xs text-gray-900">
                     {entry.master_elevators?.name}
