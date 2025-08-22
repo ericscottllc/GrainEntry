@@ -813,6 +813,5 @@ export const GrainEntriesPage: React.FC = () => {
       </div>
     </div>
   </div>
-    </div>
   );
 };
