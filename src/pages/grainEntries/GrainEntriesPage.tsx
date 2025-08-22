@@ -1,657 +1,672 @@
 import React, { useState, useEffect } from 'react';
-import { motion } from 'framer-motion';
-import { Plus, Trash2, Search, Calendar, Brain as Grain, Save, Loader } from 'lucide-react';
-import { useNotifications } from '../../contexts/NotificationContext';
-import { supabase } from '../../lib/supabase';
-import { Button, Input, Card } from '../../components/Shared/SharedComponents';
+import { Search, Save, Trash2, ArrowUpDown } from 'lucide-react';
+import {
+  listEntries, listCrops, listElevators, listTowns,
+  insertEntries, softDeleteEntry,
+  type GrainEntry, type GrainEntryInsert, type GrainEntryFilters, type SortConfig
+} from '../../lib/grainEntryQueries';
 
-interface GrainEntry {
+interface Toast {
+  message: string;
+  type: 'success' | 'error';
+}
+
+interface EntryRow {
   id: string;
-  date: string;
-  crop: string;
-  elevator: string;
-  town: string;
-  month: string;
-  year: number;
-  cash_price: number;
-  futures_price: number;
-  basis: number;
-  is_active: boolean;
-  created_at: string;
+  elevator_id: string;
+  town_id: string;
+  cash_prices: string[];
 }
 
-interface LocationRow {
-  id: string;
-  elevator: string;
-  town: string;
-  prices: { [key: string]: string }; // month_year -> price
-}
-
-interface FuturesPrice {
-  month: string;
-  year: number;
-  price: string;
-}
-
-const MONTHS = [
-  'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
-  'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'
-];
-
-const CROPS = ['Corn', 'Wheat', 'Soybeans', 'Oats', 'Barley'];
-const ELEVATORS = ['Grain Co-op', 'Prairie Elevator', 'Harvest Point', 'Golden Grain', 'Farm Fresh'];
-const TOWNS = ['Winnipeg', 'Calgary', 'Edmonton', 'Saskatoon', 'Regina', 'Brandon'];
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
 export const GrainEntriesPage: React.FC = () => {
-  const { success, error } = useNotifications();
-  
-  // Form state
-  const [entryDate, setEntryDate] = useState(new Date().toISOString().split('T')[0]);
-  const [selectedCrop, setSelectedCrop] = useState('');
-  const [futuresPrices, setFuturesPrices] = useState<FuturesPrice[]>([
-    { month: '', year: new Date().getFullYear(), price: '' },
-    { month: '', year: new Date().getFullYear(), price: '' },
-    { month: '', year: new Date().getFullYear(), price: '' },
-    { month: '', year: new Date().getFullYear(), price: '' },
-    { month: '', year: new Date().getFullYear(), price: '' },
-    { month: '', year: new Date().getFullYear(), price: '' }
-  ]);
-  const [locationRows, setLocationRows] = useState<LocationRow[]>([
-    { id: '1', elevator: '', town: '', prices: {} }
-  ]);
-  
-  // Table state
   const [entries, setEntries] = useState<GrainEntry[]>([]);
-  const [filteredEntries, setFilteredEntries] = useState<GrainEntry[]>([]);
-  const [searchTerm, setSearchTerm] = useState('');
-  const [filterCrop, setFilterCrop] = useState('');
-  const [filterElevator, setFilterElevator] = useState('');
-  const [filterTown, setFilterTown] = useState('');
-  const [sortField, setSortField] = useState<'date' | 'crop'>('date');
-  const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('desc');
+  const [crops, setCrops] = useState<any[]>([]);
+  const [elevators, setElevators] = useState<any[]>([]);
+  const [towns, setTowns] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [toast, setToast] = useState<Toast | null>(null);
   
-  // Loading states
-  const [saving, setSaving] = useState(false);
-  const [loading, setLoading] = useState(false);
+  // Filters and sorting for existing entries
+  const [filters, setFilters] = useState<GrainEntryFilters>({});
+  const [sort, setSort] = useState<SortConfig>({ field: 'date', direction: 'desc' });
+  const [searchTerm, setSearchTerm] = useState('');
+  
+  // Separate state for applied filters (what's actually used in queries)
+  const [appliedFilters, setAppliedFilters] = useState<GrainEntryFilters>({});
+  const [appliedSort, setAppliedSort] = useState<SortConfig>({ field: 'date', direction: 'desc' });
+  const [appliedSearchTerm, setAppliedSearchTerm] = useState('');
+  
+  // Entry form state
+  const [entryDate, setEntryDate] = useState(new Date().toISOString().split('T')[0]);
+  const [entryCrop, setEntryCrop] = useState('');
+  const [entryMonths, setEntryMonths] = useState<string[]>(['', '', '', '', '', '']);
+  const [entryYears, setEntryYears] = useState<number[]>([0, 0, 0, 0, 0, 0]);
+  const [entryFutures, setEntryFutures] = useState<string[]>(['', '', '', '', '', '']);
+  const [entryRows, setEntryRows] = useState<EntryRow[]>([
+    { id: '1', elevator_id: '', town_id: '', cash_prices: ['', '', '', '', '', ''] }
+  ]);
 
-  // Auto-fill futures months when first month is selected
-  const handleFuturesMonthChange = (index: number, month: string) => {
-    if (index === 0 && month) {
-      const newFuturesPrices = [...futuresPrices];
-      const startMonthIndex = MONTHS.indexOf(month);
-      let currentYear = newFuturesPrices[0].year;
-      
-      for (let i = 0; i < 6; i++) {
-        const monthIndex = (startMonthIndex + i) % 12;
-        if (i > 0 && monthIndex === 0) {
-          currentYear++;
-        }
-        newFuturesPrices[i] = {
-          ...newFuturesPrices[i],
-          month: MONTHS[monthIndex],
-          year: currentYear
-        };
-      }
-      setFuturesPrices(newFuturesPrices);
-    } else {
-      const newFuturesPrices = [...futuresPrices];
-      newFuturesPrices[index].month = month;
-      setFuturesPrices(newFuturesPrices);
-    }
+  const showToast = (message: string, type: 'success' | 'error') => {
+    setToast({ message, type });
+    setTimeout(() => setToast(null), 3000);
   };
 
-  // Handle futures price changes
-  const handleFuturesPriceChange = (index: number, field: 'year' | 'price', value: string | number) => {
-    const newFuturesPrices = [...futuresPrices];
-    newFuturesPrices[index] = { ...newFuturesPrices[index], [field]: value };
-    setFuturesPrices(newFuturesPrices);
-  };
-
-  // Handle location row changes
-  const handleLocationChange = (rowId: string, field: 'elevator' | 'town', value: string) => {
-    const newRows = locationRows.map(row => {
-      if (row.id === rowId) {
-        return { ...row, [field]: value };
-      }
-      return row;
-    });
-    setLocationRows(newRows);
-
-    // Add new row if both elevator and town are selected in the last row
-    const lastRow = newRows[newRows.length - 1];
-    if (lastRow.elevator && lastRow.town && rowId === lastRow.id) {
-      const newRowId = Date.now().toString();
-      setLocationRows([...newRows, { id: newRowId, elevator: '', town: '', prices: {} }]);
-    }
-  };
-
-  // Handle cash price changes
-  const handleCashPriceChange = (rowId: string, monthYear: string, price: string) => {
-    const newRows = locationRows.map(row => {
-      if (row.id === rowId) {
-        return {
-          ...row,
-          prices: { ...row.prices, [monthYear]: price }
-        };
-      }
-      return row;
-    });
-    setLocationRows(newRows);
-  };
-
-  // Delete location row
-  const deleteLocationRow = (rowId: string) => {
-    if (locationRows.length > 1) {
-      setLocationRows(locationRows.filter(row => row.id !== rowId));
-    }
-  };
-
-  // Save entries
-  const saveEntries = async () => {
-    if (!entryDate || !selectedCrop) {
-      error('Validation Error', 'Please select a date and crop');
-      return;
-    }
-
-    setSaving(true);
+  const loadData = async () => {
     try {
-      const entriesToSave = [];
-      
-      // Process each location row
-      for (const row of locationRows) {
-        if (row.elevator && row.town) {
-          // Process each month that has both futures and cash price
-          for (let i = 0; i < 6; i++) {
-            const futures = futuresPrices[i];
-            const monthYear = `${futures.month}_${futures.year}`;
-            const cashPrice = row.prices[monthYear];
-            
-            if (futures.month && futures.price && cashPrice) {
-              const futuresPrice = parseFloat(futures.price);
-              const cashPriceNum = parseFloat(cashPrice);
-              const basis = cashPriceNum - futuresPrice;
-              
-              entriesToSave.push({
-                date: entryDate,
-                crop: selectedCrop,
-                elevator: row.elevator,
-                town: row.town,
-                month: futures.month,
-                year: futures.year,
-                cash_price: cashPriceNum,
-                futures_price: futuresPrice,
-                basis: basis,
-                is_active: true
-              });
-            }
-          }
-        }
-      }
-
-      if (entriesToSave.length === 0) {
-        error('No Valid Entries', 'Please ensure you have complete data for at least one location and month');
-        return;
-      }
-
-      const { error: saveError } = await supabase
-        .from('grain_entries')
-        .insert(entriesToSave);
-
-      if (saveError) throw saveError;
-
-      success('Entries Saved', `Successfully saved ${entriesToSave.length} grain entries`);
-      
-      // Reset form
-      setSelectedCrop('');
-      setFuturesPrices([
-        { month: '', year: new Date().getFullYear(), price: '' },
-        { month: '', year: new Date().getFullYear(), price: '' },
-        { month: '', year: new Date().getFullYear(), price: '' },
-        { month: '', year: new Date().getFullYear(), price: '' },
-        { month: '', year: new Date().getFullYear(), price: '' },
-        { month: '', year: new Date().getFullYear(), price: '' }
+      setLoading(true);
+      const [entriesData, cropsData, elevatorsData, townsData] = await Promise.all([
+        listEntries(appliedFilters, appliedSort),
+        listCrops(),
+        listElevators(),
+        listTowns()
       ]);
-      setLocationRows([{ id: '1', elevator: '', town: '', prices: {} }]);
       
-      // Refresh entries
-      loadEntries();
-    } catch (err) {
-      console.error('Error saving entries:', err);
-      error('Save Failed', 'Failed to save grain entries');
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  // Load entries
-  const loadEntries = async () => {
-    setLoading(true);
-    try {
-      const { data, error: loadError } = await supabase
-        .from('grain_entries')
-        .select('*')
-        .eq('is_active', true)
-        .order('date', { ascending: false });
-
-      if (loadError) throw loadError;
-      setEntries(data || []);
-      setFilteredEntries(data || []);
-    } catch (err) {
-      console.error('Error loading entries:', err);
-      error('Load Failed', 'Failed to load grain entries');
+      setEntries(entriesData);
+      setCrops(cropsData);
+      setElevators(elevatorsData);
+      setTowns(townsData);
+    } catch (error) {
+      showToast('Failed to load data', 'error');
     } finally {
       setLoading(false);
     }
   };
 
-  // Search and filter entries
-  const searchEntries = () => {
-    let filtered = [...entries];
-
-    // Apply text search
-    if (searchTerm) {
-      const term = searchTerm.toLowerCase();
-      filtered = filtered.filter(entry =>
-        entry.crop.toLowerCase().includes(term) ||
-        entry.elevator.toLowerCase().includes(term) ||
-        entry.town.toLowerCase().includes(term) ||
-        entry.month.toLowerCase().includes(term) ||
-        entry.year.toString().includes(term)
-      );
-    }
-
-    // Apply dropdown filters
-    if (filterCrop) {
-      filtered = filtered.filter(entry => entry.crop === filterCrop);
-    }
-    if (filterElevator) {
-      filtered = filtered.filter(entry => entry.elevator === filterElevator);
-    }
-    if (filterTown) {
-      filtered = filtered.filter(entry => entry.town === filterTown);
-    }
-
-    // Apply sorting
-    filtered.sort((a, b) => {
-      let aValue, bValue;
-      if (sortField === 'date') {
-        aValue = new Date(a.date).getTime();
-        bValue = new Date(b.date).getTime();
-      } else {
-        aValue = a.crop.toLowerCase();
-        bValue = b.crop.toLowerCase();
-      }
-
-      if (sortDirection === 'asc') {
-        return aValue > bValue ? 1 : -1;
-      } else {
-        return aValue < bValue ? 1 : -1;
-      }
-    });
-
-    setFilteredEntries(filtered);
-  };
-
-  // Delete entry (soft delete)
-  const deleteEntry = async (entryId: string) => {
-    try {
-      const { error: deleteError } = await supabase
-        .from('grain_entries')
-        .update({ is_active: false })
-        .eq('id', entryId);
-
-      if (deleteError) throw deleteError;
-
-      success('Entry Deleted', 'Entry has been removed');
-      loadEntries();
-    } catch (err) {
-      console.error('Error deleting entry:', err);
-      error('Delete Failed', 'Failed to delete entry');
-    }
-  };
-
-  // Handle column sorting
-  const handleSort = (field: 'date' | 'crop') => {
-    if (sortField === field) {
-      setSortDirection(sortDirection === 'asc' ? 'desc' : 'asc');
-    } else {
-      setSortField(field);
-      setSortDirection('asc');
-    }
-    searchEntries();
-  };
-
-  // Load entries on component mount
   useEffect(() => {
-    loadEntries();
-  }, []);
+    loadData();
+  }, [appliedFilters, appliedSort]);
 
-  const canSave = entryDate && selectedCrop && !saving;
+  const handleSearch = () => {
+    setAppliedFilters(filters);
+    setAppliedSort(sort);
+    setAppliedSearchTerm(searchTerm);
+  };
+
+  const handleSort = (field: string) => {
+    setSort(prev => ({
+      field,
+      direction: prev.field === field && prev.direction === 'asc' ? 'desc' : 'asc'
+    }));
+  };
+
+  const handleFilterChange = (key: keyof GrainEntryFilters, value: string) => {
+    setFilters(prev => ({
+      ...prev,
+      [key]: value || undefined
+    }));
+  };
+
+  const calculateBasis = (cashPrice: number | null, futures: number | null): string => {
+    if (cashPrice === null || futures === null) return '-';
+    const basis = cashPrice - futures;
+    const sign = basis >= 0 ? '+' : '';
+    return `${sign}$${basis.toFixed(2)}`;
+  };
+
+  const handleDeleteEntry = async (id: string) => {
+    try {
+      await softDeleteEntry(id);
+      setEntries(entries.filter(e => e.id !== id));
+      showToast('Entry deleted successfully', 'success');
+    } catch (error) {
+      showToast('Failed to delete entry', 'error');
+    }
+  };
+
+  // Entry form functions
+  const updateEntryMonth = (index: number, value: string) => {
+    const newMonths = [...entryMonths];
+    newMonths[index] = value;
+    setEntryMonths(newMonths);
+    
+    // Auto-fill subsequent months and years when first month is selected
+    if (index === 0 && value) {
+      const monthIndex = MONTHS.indexOf(value);
+      if (monthIndex !== -1) {
+        const currentYear = new Date().getFullYear();
+        const newMonthsArray = [value];
+        const newYearsArray = [currentYear];
+        
+        for (let i = 1; i < 6; i++) {
+          const nextMonthIndex = (monthIndex + i) % 12;
+          const yearIncrement = Math.floor((monthIndex + i) / 12);
+          newMonthsArray.push(MONTHS[nextMonthIndex]);
+          newYearsArray.push(currentYear + yearIncrement);
+        }
+        
+        setEntryMonths(newMonthsArray);
+        setEntryYears(newYearsArray);
+      }
+    }
+  };
+
+  const updateEntryYear = (index: number, value: number) => {
+    const newYears = [...entryYears];
+    newYears[index] = value;
+    setEntryYears(newYears);
+  };
+
+  const updateEntryFutures = (index: number, value: string) => {
+    const newFutures = [...entryFutures];
+    newFutures[index] = value;
+    setEntryFutures(newFutures);
+  };
+
+  const updateEntryRow = (id: string, field: keyof EntryRow, value: string | string[]) => {
+    setEntryRows(rows => 
+      rows.map(row => 
+        row.id === id ? { ...row, [field]: value } : row
+      )
+    );
+    
+    // Auto-add new row when both elevator and town are filled
+    const updatedRow = entryRows.find(row => row.id === id);
+    if (updatedRow && field === 'town_id' && value && updatedRow.elevator_id) {
+      const lastRow = entryRows[entryRows.length - 1];
+      if (lastRow.id === id) {
+        addEntryRow();
+      }
+    }
+  };
+
+  const updateCashPrice = (rowId: string, monthIndex: number, value: string) => {
+    setEntryRows(rows => 
+      rows.map(row => {
+        if (row.id === rowId) {
+          const newCashPrices = [...row.cash_prices];
+          newCashPrices[monthIndex] = value;
+          return { ...row, cash_prices: newCashPrices };
+        }
+        return row;
+      })
+    );
+  };
+
+  const addEntryRow = () => {
+    setEntryRows([
+      ...entryRows,
+      { id: Date.now().toString(), elevator_id: '', town_id: '', cash_prices: ['', '', '', '', '', ''] }
+    ]);
+  };
+
+  const removeEntryRow = (id: string) => {
+    if (entryRows.length > 1) {
+      setEntryRows(entryRows.filter(row => row.id !== id));
+    }
+  };
+
+  const handleSaveEntries = async () => {
+    try {
+      const entriesToInsert: GrainEntryInsert[] = [];
+      
+      for (let monthIndex = 0; monthIndex < 6; monthIndex++) {
+        const month = entryMonths[monthIndex];
+        const year = entryYears[monthIndex];
+        const futures = parseFloat(entryFutures[monthIndex]) || null;
+        
+        if (!month || !year) continue;
+        
+        for (const row of entryRows) {
+          if (!row.elevator_id || !row.town_id) continue;
+          
+          const cashPrice = parseFloat(row.cash_prices[monthIndex]) || null;
+          if (cashPrice === null) continue; // Skip rows with no cash price
+          
+          entriesToInsert.push({
+            date: entryDate,
+            crop_id: entryCrop,
+            elevator_id: row.elevator_id,
+            town_id: row.town_id,
+            month,
+            year,
+            cash_price: cashPrice,
+            futures,
+            notes: ''
+          });
+        }
+      }
+      
+      if (entriesToInsert.length === 0) {
+        showToast('Please fill in required fields and cash prices', 'error');
+        return;
+      }
+      
+      await insertEntries(entriesToInsert);
+      
+      // Clear form
+      setEntryDate(new Date().toISOString().split('T')[0]);
+      setEntryCrop('');
+      setEntryMonths(['', '', '', '', '', '']);
+      setEntryYears([0, 0, 0, 0, 0, 0]);
+      setEntryFutures(['', '', '', '', '', '']);
+      setEntryRows([{ id: '1', elevator_id: '', town_id: '', cash_prices: ['', '', '', '', '', ''] }]);
+      
+      loadData();
+      showToast(`${entriesToInsert.length} entries saved successfully`, 'success');
+    } catch (error) {
+      showToast('Failed to save entries', 'error');
+    }
+  };
+
+  const filteredEntries = entries.filter(entry => {
+    if (!appliedSearchTerm) return true;
+    const searchLower = appliedSearchTerm.toLowerCase();
+    return (
+      entry.master_crops?.name.toLowerCase().includes(searchLower) ||
+      entry.master_elevators?.name.toLowerCase().includes(searchLower) ||
+      entry.master_towns?.name.toLowerCase().includes(searchLower) ||
+      entry.month.toLowerCase().includes(searchLower) ||
+      entry.year.toString().includes(searchLower) ||
+      entry.notes.toLowerCase().includes(searchLower)
+    );
+  });
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-tg-primary"></div>
+      </div>
+    );
+  }
 
   return (
-    <div className="p-6 space-y-8">
-      {/* Header */}
-      <motion.div
-        initial={{ opacity: 0, y: 20 }}
-        animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.6 }}
-      >
-        <div className="flex items-center gap-3 mb-2">
-          <div className="w-10 h-10 bg-tg-green rounded-xl flex items-center justify-center">
-            <Grain className="w-5 h-5 text-white" />
-          </div>
-          <h1 className="text-3xl font-bold text-gray-800">Grain Entries</h1>
-        </div>
-        <p className="text-gray-600">Manage grain market data and pricing information</p>
-      </motion.div>
+    <div className="space-y-6 p-6">
+      <h1 className="text-2xl font-bold text-gray-900">Grain Entries</h1>
 
-      {/* New Entry Form */}
-      <Card variant="elevated" className="space-y-6">
-        <div className="flex items-center gap-2 mb-4">
-          <Plus className="w-5 h-5 text-tg-green" />
-          <h2 className="text-xl font-semibold text-gray-800">New Entry Form</h2>
+      {/* Toast */}
+      {toast && (
+        <div className={`fixed top-4 right-4 z-50 px-4 py-2 rounded-md shadow-lg ${
+          toast.type === 'success' ? 'bg-green-500 text-white' : 'bg-red-500 text-white'
+        }`}>
+          {toast.message}
         </div>
+      )}
 
-        {/* Date and Crop Selection */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">
-              <Calendar className="w-4 h-4 inline mr-1" />
-              Date of Entry
-            </label>
-            <input
-              type="date"
-              value={entryDate}
-              onChange={(e) => setEntryDate(e.target.value)}
-              className="w-full px-4 py-3 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-tg-green focus:border-transparent"
-            />
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">
-              <Grain className="w-4 h-4 inline mr-1" />
-              Crop Selection
-            </label>
-            <select
-              value={selectedCrop}
-              onChange={(e) => setSelectedCrop(e.target.value)}
-              className="w-full px-4 py-3 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-tg-green focus:border-transparent"
-            >
-              <option value="">Select Crop</option>
-              {CROPS.map(crop => (
-                <option key={crop} value={crop}>{crop}</option>
-              ))}
-            </select>
-          </div>
+      {/* Entry Form */}
+      <div className="bg-white rounded-lg shadow overflow-hidden">
+        <div className="p-4 border-b bg-gray-50">
+          <h2 className="text-lg font-semibold text-gray-900">New Entries</h2>
         </div>
-
-        {/* Futures Price Input Grid */}
-        <div>
-          <h3 className="text-lg font-semibold text-gray-800 mb-4">Futures Price Input</h3>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {futuresPrices.map((futures, index) => (
-              <div key={index} className="bg-gray-50 p-4 rounded-lg border border-gray-200">
-                <div className="space-y-3">
-                  <div>
-                    <label className="block text-xs font-medium text-gray-600 mb-1">Month</label>
+        
+        <div className="overflow-x-auto">
+          <table className="w-full border-collapse border border-gray-300 min-w-[1000px]">
+            <thead className="bg-gray-50 sticky top-0 z-10">
+              <tr>
+                <th 
+                  className="border border-gray-300 px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase"
+                  style={{ width: '160px' }}
+                >
+                  Date
+                </th>
+                <th 
+                  className="border border-gray-300 px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase"
+                  style={{ width: '140px' }}
+                >
+                  Crop
+                </th>
+                {Array.from({ length: 6 }, (_, index) => (
+                  <th 
+                    key={index}
+                    className="border border-gray-300 px-3 py-3 text-center text-xs font-medium text-gray-500 uppercase"
+                    style={{ width: '110px' }}
+                  >
+                    Futures
+                  </th>
+                ))}
+              </tr>
+              <tr>
+                <th className="border border-gray-300 px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase bg-tg-primary bg-opacity-20">
+                  Date
+                </th>
+                <th className="border border-gray-300 px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase bg-tg-primary bg-opacity-20">
+                  Crop
+                </th>
+                {Array.from({ length: 6 }, (_, index) => (
+                  <th key={index} className="border border-gray-300 px-3 py-2 text-center text-xs font-medium text-gray-500 uppercase bg-tg-primary bg-opacity-20">
                     <select
-                      value={futures.month}
-                      onChange={(e) => handleFuturesMonthChange(index, e.target.value)}
-                      className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-tg-green"
+                      value={entryMonths[index]}
+                      onChange={(e) => updateEntryMonth(index, e.target.value)}
+                      className="w-full px-1 py-1 border border-gray-300 rounded text-xs bg-white"
                     >
-                      <option value="">Select</option>
+                      <option value="">Month</option>
                       {MONTHS.map(month => (
                         <option key={month} value={month}>{month}</option>
                       ))}
                     </select>
-                  </div>
-                  <div>
-                    <label className="block text-xs font-medium text-gray-600 mb-1">Year</label>
+                  </th>
+                ))}
+              </tr>
+              <tr>
+                <th className="border border-gray-300 px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase bg-tg-primary bg-opacity-10">
+                  Date
+                </th>
+                <th className="border border-gray-300 px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase bg-tg-primary bg-opacity-10">
+                  Crop
+                </th>
+                {Array.from({ length: 6 }, (_, index) => (
+                  <th key={index} className="border border-gray-300 px-3 py-2 text-center text-xs font-medium text-gray-500 uppercase bg-tg-primary bg-opacity-10">
                     <input
                       type="number"
-                      value={futures.year}
-                      onChange={(e) => handleFuturesPriceChange(index, 'year', parseInt(e.target.value) || new Date().getFullYear())}
-                      className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-tg-green"
+                      value={entryYears[index] || ''}
+                      onChange={(e) => updateEntryYear(index, parseInt(e.target.value) || 0)}
+                      className="w-full px-1 py-1 border border-gray-300 rounded text-xs text-center bg-white"
+                      placeholder="Year"
                       min="2020"
                       max="2030"
                     />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-medium text-gray-600 mb-1">Futures Price</label>
+                  </th>
+                ))}
+              </tr>
+              <tr className="bg-gray-100">
+                <th className="border border-gray-300 px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase">
+                  Date
+                </th>
+                <th className="border border-gray-300 px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase">
+                  Crop
+                </th>
+                {Array.from({ length: 6 }, (_, index) => (
+                  <th key={index} className="border border-gray-300 px-3 py-3 text-center text-xs font-medium text-gray-500 uppercase bg-tg-primary bg-opacity-30">
+                    Futures
+                  </th>
+                ))}
+              </tr>
+              <tr className="bg-gray-100">
+                <td className="border border-gray-300 px-3 py-3 bg-tg-primary bg-opacity-20">
+                  <input
+                    type="date"
+                    value={entryDate}
+                    onChange={(e) => setEntryDate(e.target.value)}
+                    className="w-full px-2 py-2 border border-gray-300 rounded text-sm"
+                  />
+                </td>
+                <td className="border border-gray-300 px-3 py-3 bg-tg-primary bg-opacity-20">
+                  <select
+                    value={entryCrop}
+                    onChange={(e) => setEntryCrop(e.target.value)}
+                    className="w-full px-2 py-2 border border-gray-300 rounded text-sm"
+                  >
+                    <option value="">Select Crop</option>
+                    {crops.map(crop => (
+                      <option key={crop.id} value={crop.id}>{crop.name}</option>
+                    ))}
+                  </select>
+                </td>
+                {Array.from({ length: 6 }, (_, index) => (
+                  <td key={index} className="border border-gray-300 px-3 py-3 bg-tg-primary bg-opacity-10">
                     <input
                       type="number"
                       step="0.01"
-                      value={futures.price}
-                      onChange={(e) => handleFuturesPriceChange(index, 'price', e.target.value)}
-                      className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-tg-green"
+                      value={entryFutures[index]}
+                      onChange={(e) => updateEntryFutures(index, e.target.value)}
+                      className="w-full px-2 py-2 border border-gray-300 rounded text-sm text-right"
                       placeholder="0.00"
                     />
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        {/* Location and Cash Price Input Table */}
-        <div>
-          <h3 className="text-lg font-semibold text-gray-800 mb-4">Location and Cash Price Input</h3>
-          <div className="overflow-x-auto">
-            <table className="w-full border border-gray-200 rounded-lg">
-              <thead className="bg-gray-50">
-                <tr>
-                  <th className="px-4 py-3 text-left text-sm font-medium text-gray-700 border-b">Elevator</th>
-                  <th className="px-4 py-3 text-left text-sm font-medium text-gray-700 border-b">Town</th>
-                  {futuresPrices.map((futures, index) => (
-                    <th key={index} className="px-4 py-3 text-center text-sm font-medium text-gray-700 border-b">
-                      {futures.month && futures.year ? `${futures.month} ${futures.year}` : `Month ${index + 1}`}
-                    </th>
-                  ))}
-                  <th className="px-4 py-3 text-center text-sm font-medium text-gray-700 border-b">Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {locationRows.map((row, rowIndex) => (
-                  <tr key={row.id} className="border-b border-gray-100">
-                    <td className="px-4 py-3">
-                      <select
-                        value={row.elevator}
-                        onChange={(e) => handleLocationChange(row.id, 'elevator', e.target.value)}
-                        className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-tg-green"
-                      >
-                        <option value="">Select Elevator</option>
-                        {ELEVATORS.map(elevator => (
-                          <option key={elevator} value={elevator}>{elevator}</option>
-                        ))}
-                      </select>
-                    </td>
-                    <td className="px-4 py-3">
-                      <select
-                        value={row.town}
-                        onChange={(e) => handleLocationChange(row.id, 'town', e.target.value)}
-                        className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-tg-green"
-                      >
-                        <option value="">Select Town</option>
-                        {TOWNS.map(town => (
-                          <option key={town} value={town}>{town}</option>
-                        ))}
-                      </select>
-                    </td>
-                    {futuresPrices.map((futures, index) => {
-                      const monthYear = `${futures.month}_${futures.year}`;
-                      return (
-                        <td key={index} className="px-4 py-3">
-                          <input
-                            type="number"
-                            step="0.01"
-                            value={row.prices[monthYear] || ''}
-                            onChange={(e) => handleCashPriceChange(row.id, monthYear, e.target.value)}
-                            className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-tg-green text-center"
-                            placeholder="0.00"
-                            disabled={!futures.month || !futures.year}
-                          />
-                        </td>
-                      );
-                    })}
-                    <td className="px-4 py-3 text-center">
-                      {locationRows.length > 1 && (
-                        <button
-                          onClick={() => deleteLocationRow(row.id)}
-                          className="p-2 text-red-500 hover:bg-red-50 rounded-lg transition-colors"
-                          title="Delete row"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
-                      )}
-                    </td>
-                  </tr>
+                  </td>
                 ))}
-              </tbody>
-            </table>
+              </tr>
+              <tr className="bg-gray-50">
+                <th className="border border-gray-300 px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase">
+                  Elevator
+                </th>
+                <th className="border border-gray-300 px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase">
+                  Town
+                </th>
+                {Array.from({ length: 6 }, (_, index) => (
+                  <th key={index} className="border border-gray-300 px-2 py-2 text-center text-xs font-medium text-gray-500 uppercase bg-tg-primary bg-opacity-40">
+                    <div className="text-center">
+                      {entryMonths[index] && entryYears[index] ? 
+                        `${entryMonths[index]} ${entryYears[index]}` : 
+                        'Month Year'
+                      }
+                    </div>
+                  </th>
+                ))}
+                <th className="border border-gray-300 px-1 py-2 text-center text-xs font-medium text-gray-500 uppercase" style={{ width: '40px' }}>
+                  Del
+                </th>
+              </tr>
+            </thead>
+            <tbody className="bg-white">
+              {entryRows.map((row) => (
+                <tr key={row.id} className="hover:bg-gray-50">
+                  <td className="border border-gray-300 px-2 py-3">
+                    <select
+                      value={row.elevator_id}
+                      onChange={(e) => updateEntryRow(row.id, 'elevator_id', e.target.value)}
+                      className="w-full px-2 py-1 border border-gray-300 rounded text-sm"
+                    >
+                      <option value="">Select Elevator</option>
+                      {elevators.map(elevator => (
+                        <option key={elevator.id} value={elevator.id}>{elevator.name}</option>
+                      ))}
+                    </select>
+                  </td>
+                  <td className="border border-gray-300 px-2 py-3">
+                    <select
+                      value={row.town_id}
+                      onChange={(e) => updateEntryRow(row.id, 'town_id', e.target.value)}
+                      className="w-full px-2 py-1 border border-gray-300 rounded text-sm"
+                    >
+                      <option value="">Select Town</option>
+                      {towns.map(town => (
+                        <option key={town.id} value={town.id}>{town.name}</option>
+                      ))}
+                    </select>
+                  </td>
+                  {Array.from({ length: 6 }, (_, index) => (
+                    <td key={index} className="border border-gray-300 px-2 py-3">
+                      <input
+                        type="number"
+                        step="0.01"
+                        value={row.cash_prices[index]}
+                        onChange={(e) => updateCashPrice(row.id, index, e.target.value)}
+                        className="w-full px-2 py-2 border border-gray-300 rounded text-sm text-right"
+                        placeholder="0.00"
+                      />
+                    </td>
+                  ))}
+                  <td className="border border-gray-300 px-3 py-3 text-center">
+                    {entryRows.length > 1 && (
+                      <button
+                        onClick={() => removeEntryRow(row.id)}
+                        className="text-red-600 hover:text-red-800 p-1"
+                      >
+                        <Trash2 className="h-3 w-3" />
+                      </button>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        
+        <div className="p-4 bg-gray-50 border-t flex justify-between">
+          <div className="text-sm text-gray-600">
+            Rows auto-add when you select both elevator and town
           </div>
-        </div>
-
-        {/* Save Button */}
-        <div className="flex justify-end">
-          <Button
-            onClick={saveEntries}
-            disabled={!canSave}
-            loading={saving}
-            variant="secondary"
-            size="lg"
-            icon={Save}
+          <button
+            onClick={handleSaveEntries}
+            disabled={!entryDate || !entryCrop}
+            className="flex items-center px-6 py-2 bg-tg-primary text-gray-900 rounded-md hover:bg-opacity-80 disabled:opacity-50 disabled:cursor-not-allowed font-medium"
           >
+            <Save className="h-4 w-4 mr-2" />
             Save Entries
-          </Button>
+          </button>
         </div>
-      </Card>
+      </div>
 
-      {/* Existing Entries Table */}
-      <Card variant="elevated" className="space-y-6">
-        <div className="flex items-center gap-2 mb-4">
-          <Search className="w-5 h-5 text-tg-primary" />
-          <h2 className="text-xl font-semibold text-gray-800">Existing Entries</h2>
-        </div>
-
-        {/* Search and Filter Controls */}
-        <div className="space-y-4">
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-            <Input
-              placeholder="Search entries..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              icon={Search}
-            />
+      {/* Search and Filters for Existing Entries */}
+      <div className="bg-white p-4 rounded-lg shadow">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Search</label>
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
+              <input
+                type="text"
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="pl-10 w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-tg-primary focus:border-tg-primary"
+                placeholder="Search entries..."
+              />
+            </div>
+          </div>
+          
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Crop</label>
             <select
-              value={filterCrop}
-              onChange={(e) => setFilterCrop(e.target.value)}
-              className="px-4 py-3 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-tg-primary focus:border-transparent"
+              value={filters.crop_id || ''}
+              onChange={(e) => handleFilterChange('crop_id', e.target.value)}
+              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-tg-primary focus:border-tg-primary"
             >
               <option value="">All Crops</option>
-              {CROPS.map(crop => (
-                <option key={crop} value={crop}>{crop}</option>
+              {crops.map(crop => (
+                <option key={crop.id} value={crop.id}>{crop.name}</option>
               ))}
             </select>
+          </div>
+          
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Elevator</label>
             <select
-              value={filterElevator}
-              onChange={(e) => setFilterElevator(e.target.value)}
-              className="px-4 py-3 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-tg-primary focus:border-transparent"
+              value={filters.elevator_id || ''}
+              onChange={(e) => handleFilterChange('elevator_id', e.target.value)}
+              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-tg-primary focus:border-tg-primary"
             >
               <option value="">All Elevators</option>
-              {ELEVATORS.map(elevator => (
-                <option key={elevator} value={elevator}>{elevator}</option>
+              {elevators.map(elevator => (
+                <option key={elevator.id} value={elevator.id}>{elevator.name}</option>
               ))}
             </select>
+          </div>
+          
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Town</label>
             <select
-              value={filterTown}
-              onChange={(e) => setFilterTown(e.target.value)}
-              className="px-4 py-3 border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-tg-primary focus:border-transparent"
+              value={filters.town_id || ''}
+              onChange={(e) => handleFilterChange('town_id', e.target.value)}
+              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-tg-primary focus:border-tg-primary"
             >
               <option value="">All Towns</option>
-              {TOWNS.map(town => (
-                <option key={town} value={town}>{town}</option>
+              {towns.map(town => (
+                <option key={town.id} value={town.id}>{town.name}</option>
               ))}
             </select>
           </div>
-          <div className="flex justify-end">
-            <Button onClick={searchEntries} icon={Search}>
+          
+          <div className="flex items-end">
+            <button
+              onClick={handleSearch}
+              className="w-full px-4 py-2 bg-tg-primary text-gray-900 rounded-md hover:bg-opacity-80 font-medium"
+            >
               Search
-            </Button>
+            </button>
           </div>
         </div>
+      </div>
 
-        {/* Data Table */}
-        <div className="overflow-x-auto">
-          {loading ? (
-            <div className="flex items-center justify-center py-12">
-              <Loader className="w-8 h-8 animate-spin text-tg-primary" />
-              <span className="ml-2 text-gray-600">Loading entries...</span>
-            </div>
-          ) : (
-            <table className="w-full border border-gray-200 rounded-lg">
-              <thead className="bg-gray-50">
-                <tr>
-                  <th 
-                    className="px-4 py-3 text-left text-sm font-medium text-gray-700 border-b cursor-pointer hover:bg-gray-100"
-                    onClick={() => handleSort('date')}
-                  >
-                    Date {sortField === 'date' && (sortDirection === 'asc' ? '↑' : '↓')}
-                  </th>
-                  <th 
-                    className="px-4 py-3 text-left text-sm font-medium text-gray-700 border-b cursor-pointer hover:bg-gray-100"
-                    onClick={() => handleSort('crop')}
-                  >
-                    Crop {sortField === 'crop' && (sortDirection === 'asc' ? '↑' : '↓')}
-                  </th>
-                  <th className="px-4 py-3 text-left text-sm font-medium text-gray-700 border-b">Elevator</th>
-                  <th className="px-4 py-3 text-left text-sm font-medium text-gray-700 border-b">Town</th>
-                  <th className="px-4 py-3 text-left text-sm font-medium text-gray-700 border-b">Month/Year</th>
-                  <th className="px-4 py-3 text-right text-sm font-medium text-gray-700 border-b">Cash Price</th>
-                  <th className="px-4 py-3 text-right text-sm font-medium text-gray-700 border-b">Futures</th>
-                  <th className="px-4 py-3 text-right text-sm font-medium text-gray-700 border-b">Basis</th>
-                  <th className="px-4 py-3 text-center text-sm font-medium text-gray-700 border-b">Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filteredEntries.length === 0 ? (
-                  <tr>
-                    <td colSpan={9} className="px-4 py-12 text-center text-gray-500">
-                      No entries found. Create your first grain entry above.
-                    </td>
-                  </tr>
-                ) : (
-                  filteredEntries.map((entry) => (
-                    <tr key={entry.id} className="border-b border-gray-100 hover:bg-gray-50">
-                      <td className="px-4 py-3 text-sm text-gray-800">
-                        {new Date(entry.date).toLocaleDateString()}
-                      </td>
-                      <td className="px-4 py-3 text-sm text-gray-800">{entry.crop}</td>
-                      <td className="px-4 py-3 text-sm text-gray-800">{entry.elevator}</td>
-                      <td className="px-4 py-3 text-sm text-gray-800">{entry.town}</td>
-                      <td className="px-4 py-3 text-sm text-gray-800">{entry.month} {entry.year}</td>
-                      <td className="px-4 py-3 text-sm text-gray-800 text-right">${entry.cash_price.toFixed(2)}</td>
-                      <td className="px-4 py-3 text-sm text-gray-800 text-right">${entry.futures_price.toFixed(2)}</td>
-                      <td className={`px-4 py-3 text-sm text-right font-medium ${
-                        entry.basis >= 0 ? 'text-green-600' : 'text-red-600'
-                      }`}>
-                        {entry.basis >= 0 ? '+' : ''}${entry.basis.toFixed(2)}
-                      </td>
-                      <td className="px-4 py-3 text-center">
-                        <button
-                          onClick={() => deleteEntry(entry.id)}
-                          className="p-2 text-red-500 hover:bg-red-50 rounded-lg transition-colors"
-                          title="Delete entry"
-                        >
-                          <Trash2 className="w-4 h-4" />
-                        </button>
-                      </td>
-                    </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
-          )}
+      {/* Existing Entries Table */}
+      <div className="bg-white rounded-lg shadow overflow-hidden">
+        <div className="p-4 border-b bg-gray-50">
+          <h2 className="text-lg font-semibold text-gray-900">Existing Entries</h2>
         </div>
-      </Card>
+        
+        <div className="overflow-x-auto">
+          <table className="min-w-full divide-y divide-gray-200">
+            <thead className="bg-gray-50 sticky top-0">
+              <tr>
+                <th 
+                  className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100"
+                  onClick={() => handleSort('date')}
+                >
+                  <div className="flex items-center">
+                    Date
+                    <ArrowUpDown className="ml-1 h-3 w-3" />
+                  </div>
+                </th>
+                <th 
+                  className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100"
+                  onClick={() => handleSort('master_crops.name')}
+                >
+                  <div className="flex items-center">
+                    Crop
+                    <ArrowUpDown className="ml-1 h-3 w-3" />
+                  </div>
+                </th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  Elevator
+                </th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  Town
+                </th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  Month/Year
+                </th>
+                <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  Cash Price
+                </th>
+                <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  Futures
+                </th>
+                <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  Basis
+                </th>
+                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                  Actions
+                </th>
+              </tr>
+            </thead>
+            <tbody className="bg-white divide-y divide-gray-200">
+              {filteredEntries.map((entry) => (
+                <tr key={entry.id} className="hover:bg-gray-50">
+                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                    {new Date(entry.date).toLocaleDateString()}
+                  </td>
+                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                    {entry.master_crops?.name}
+                  </td>
+                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                    {entry.master_elevators?.name}
+                  </td>
+                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                    {entry.master_towns?.name}
+                  </td>
+                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                    {entry.month} {entry.year}
+                  </td>
+                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 text-right">
+                    {entry.cash_price ? `$${entry.cash_price.toFixed(2)}` : '-'}
+                  </td>
+                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 text-right">
+                    {entry.futures ? `$${entry.futures.toFixed(2)}` : '-'}
+                  </td>
+                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 text-right font-medium">
+                    {calculateBasis(entry.cash_price, entry.futures)}
+                  </td>
+                  <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
+                    <button
+                      onClick={() => handleDeleteEntry(entry.id)}
+                      className="text-red-600 hover:text-red-900"
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </button>
+                  </td>
+                </tr>
+              ))}
+              {filteredEntries.length === 0 && (
+                <tr>
+                  <td colSpan={9} className="px-6 py-4 text-center text-gray-500">
+                    No entries found
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
     </div>
   );
 };
