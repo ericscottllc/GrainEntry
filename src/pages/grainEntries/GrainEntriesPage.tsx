@@ -1,11 +1,17 @@
 import React, { useState, useEffect } from 'react';
 import { Search, Save, Trash2, ArrowUpDown, Plus } from 'lucide-react';
-import {
-  listEntries, listCropClasses, listRegions, listRegionAssociations, listElevators, listTowns,
-  insertEntries, softDeleteEntry, listRegionsByClass,
-  type GrainEntry, type GrainEntryInsert, type GrainEntryFilters, type SortConfig,
-  type CropClass, type MasterRegion, type RegionAssociation
-} from '../../lib/grainEntryQueries';
+import { listEntries, insertEntries, softDeleteEntry } from './queries';
+import { listCropClasses, listRegions, listRegionsByClass, listRegionAssociations, listElevators, listTowns } from './masterDataQueries';
+import { MONTHS } from './utils';
+import type { 
+  GrainEntry, 
+  GrainEntryInsert, 
+  GrainEntryFilters, 
+  SortConfig,
+  CropClass, 
+  MasterRegion, 
+  RegionAssociation 
+} from './types';
 
 interface Toast {
   message: string;
@@ -18,8 +24,6 @@ interface EntryRow {
   town_id: string;
   cash_prices: string[];
 }
-
-const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
 export const GrainEntriesPage: React.FC = () => {
   const [entries, setEntries] = useState<GrainEntry[]>([]);

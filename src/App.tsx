@@ -89,26 +89,26 @@ const AppContent: React.FC = () => {
 
   return (
     <>
-    <motion.div
-      className="flex h-screen bg-gray-50"
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-      transition={{ duration: 0.5 }}
-    >
-      <Sidebar activeItem={activeItem} onItemClick={handleItemClick} />
-      <AnimatePresence mode="wait">
-        <motion.div
-          key={activeItem}
-          initial={{ opacity: 0, x: 20 }}
-          animate={{ opacity: 1, x: 0 }}
-          exit={{ opacity: 0, x: -20 }}
-          transition={{ duration: 0.3 }}
-          className="flex-1"
-        >
-          {renderPageContent()}
-        </motion.div>
-      </AnimatePresence>
-    </motion.div>
+      <motion.div
+        className="flex h-screen bg-gray-50"
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        transition={{ duration: 0.5 }}
+      >
+        <Sidebar activeItem={activeItem} onItemClick={handleItemClick} />
+        <AnimatePresence mode="wait">
+          <motion.div
+            key={activeItem}
+            initial={{ opacity: 0, x: 20 }}
+            animate={{ opacity: 1, x: 0 }}
+            exit={{ opacity: 0, x: -20 }}
+            transition={{ duration: 0.3 }}
+            className="flex-1 overflow-hidden"
+          >
+            {renderPageContent()}
+          </motion.div>
+        </AnimatePresence>
+      </motion.div>
 
       <AnimatePresence>
         {showCodeExplorer && (
