@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Search, Save, Trash2, ArrowUpDown } from 'lucide-react';
+import { Search, Save, Trash2, ArrowUpDown, Plus } from 'lucide-react';
 import {
   listEntries, listCrops, listElevators, listTowns,
   insertEntries, softDeleteEntry,
@@ -38,9 +38,11 @@ export const GrainEntriesPage: React.FC = () => {
   const [appliedSort, setAppliedSort] = useState<SortConfig>({ field: 'date', direction: 'desc' });
   const [appliedSearchTerm, setAppliedSearchTerm] = useState('');
   
-  // Entry form state
+  // Entry form state - simplified
   const [entryDate, setEntryDate] = useState(new Date().toISOString().split('T')[0]);
   const [entryCrop, setEntryCrop] = useState('');
+  const [startYear, setStartYear] = useState(new Date().getFullYear());
+  const [startMonth, setStartMonth] = useState('');
   const [entryMonths, setEntryMonths] = useState<string[]>(['', '', '', '', '', '']);
   const [entryYears, setEntryYears] = useState<number[]>([0, 0, 0, 0, 0, 0]);
   const [entryFutures, setEntryFutures] = useState<string[]>(['', '', '', '', '', '']);
@@ -78,6 +80,27 @@ export const GrainEntriesPage: React.FC = () => {
     loadData();
   }, [appliedFilters, appliedSort]);
 
+  // Auto-populate months and years when start month/year changes
+  useEffect(() => {
+    if (startMonth && startYear) {
+      const monthIndex = MONTHS.indexOf(startMonth);
+      if (monthIndex !== -1) {
+        const newMonths = [startMonth];
+        const newYears = [startYear];
+        
+        for (let i = 1; i < 6; i++) {
+          const nextMonthIndex = (monthIndex + i) % 12;
+          const yearIncrement = Math.floor((monthIndex + i) / 12);
+          newMonths.push(MONTHS[nextMonthIndex]);
+          newYears.push(startYear + yearIncrement);
+        }
+        
+        setEntryMonths(newMonths);
+        setEntryYears(newYears);
+      }
+    }
+  }, [startMonth, startYear]);
+
   const handleSearch = () => {
     setAppliedFilters(filters);
     setAppliedSort(sort);
@@ -105,6 +128,11 @@ export const GrainEntriesPage: React.FC = () => {
     return `${sign}$${basis.toFixed(2)}`;
   };
 
+  const formatPrice = (price: number | null): string => {
+    if (price === null) return '-';
+    return `$${price.toFixed(2)}`;
+  };
+
   const handleDeleteEntry = async (id: string) => {
     try {
       await softDeleteEntry(id);
@@ -115,31 +143,11 @@ export const GrainEntriesPage: React.FC = () => {
     }
   };
 
-  // Entry form functions
+  // Manual override for months/years
   const updateEntryMonth = (index: number, value: string) => {
     const newMonths = [...entryMonths];
     newMonths[index] = value;
     setEntryMonths(newMonths);
-    
-    // Auto-fill subsequent months and years when first month is selected
-    if (index === 0 && value) {
-      const monthIndex = MONTHS.indexOf(value);
-      if (monthIndex !== -1) {
-        const currentYear = new Date().getFullYear();
-        const newMonthsArray = [value];
-        const newYearsArray = [currentYear];
-        
-        for (let i = 1; i < 6; i++) {
-          const nextMonthIndex = (monthIndex + i) % 12;
-          const yearIncrement = Math.floor((monthIndex + i) / 12);
-          newMonthsArray.push(MONTHS[nextMonthIndex]);
-          newYearsArray.push(currentYear + yearIncrement);
-        }
-        
-        setEntryMonths(newMonthsArray);
-        setEntryYears(newYearsArray);
-      }
-    }
   };
 
   const updateEntryYear = (index: number, value: number) => {
@@ -182,6 +190,15 @@ export const GrainEntriesPage: React.FC = () => {
         return row;
       })
     );
+    
+    // Auto-add new row if this is the last row and we just entered a price
+    const currentRow = entryRows.find(row => row.id === rowId);
+    if (currentRow && value && currentRow.elevator_id && currentRow.town_id) {
+      const lastRow = entryRows[entryRows.length - 1];
+      if (lastRow.id === rowId) {
+        addEntryRow();
+      }
+    }
   };
 
   const addEntryRow = () => {
@@ -238,6 +255,8 @@ export const GrainEntriesPage: React.FC = () => {
       // Clear form
       setEntryDate(new Date().toISOString().split('T')[0]);
       setEntryCrop('');
+      setStartYear(new Date().getFullYear());
+      setStartMonth('');
       setEntryMonths(['', '', '', '', '', '']);
       setEntryYears([0, 0, 0, 0, 0, 0]);
       setEntryFutures(['', '', '', '', '', '']);
@@ -285,50 +304,77 @@ export const GrainEntriesPage: React.FC = () => {
       )}
 
       {/* Entry Form */}
-      <div className="bg-white rounded-lg shadow overflow-hidden">
-        <div className="p-4 border-b bg-gray-50">
+      <div className="bg-white border border-gray-300 overflow-hidden">
+        <div className="px-4 py-3 border-b border-gray-300 bg-gray-100">
           <h2 className="text-lg font-semibold text-gray-900">New Entries</h2>
         </div>
         
-        <div className="overflow-x-auto">
-          <table className="w-full border-collapse border border-gray-300 min-w-[1000px]">
-            <thead className="bg-gray-50 sticky top-0 z-10">
-              <tr>
-                <th 
-                  className="border border-gray-300 px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase"
-                  style={{ width: '160px' }}
-                >
-                  Date
-                </th>
-                <th 
-                  className="border border-gray-300 px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase"
-                  style={{ width: '140px' }}
-                >
-                  Crop
-                </th>
-                {Array.from({ length: 6 }, (_, index) => (
-                  <th 
-                    key={index}
-                    className="border border-gray-300 px-3 py-3 text-center text-xs font-medium text-gray-500 uppercase"
-                    style={{ width: '110px' }}
-                  >
-                    Futures
-                  </th>
+        {/* Header Controls */}
+        <div className="px-4 py-3 border-b border-gray-300 bg-gray-50">
+          <div className="grid grid-cols-4 gap-4">
+            <div>
+              <label className="block text-xs font-medium text-gray-700 mb-1">As Of Date</label>
+              <input
+                type="date"
+                value={entryDate}
+                onChange={(e) => setEntryDate(e.target.value)}
+                className="w-full px-2 py-1 border border-gray-300 text-sm focus:outline-none focus:border-blue-500"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-700 mb-1">Crop</label>
+              <select
+                value={entryCrop}
+                onChange={(e) => setEntryCrop(e.target.value)}
+                className="w-full px-2 py-1 border border-gray-300 text-sm focus:outline-none focus:border-blue-500"
+              >
+                <option value="">Select Crop</option>
+                {crops.map(crop => (
+                  <option key={crop.id} value={crop.id}>{crop.name}</option>
                 ))}
-              </tr>
-              <tr>
-                <th className="border border-gray-300 px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase bg-tg-primary bg-opacity-20">
-                  Date
-                </th>
-                <th className="border border-gray-300 px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase bg-tg-primary bg-opacity-20">
-                  Crop
-                </th>
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-700 mb-1">Start Year</label>
+              <input
+                type="number"
+                value={startYear}
+                onChange={(e) => setStartYear(parseInt(e.target.value) || new Date().getFullYear())}
+                className="w-full px-2 py-1 border border-gray-300 text-sm focus:outline-none focus:border-blue-500"
+                min="2020"
+                max="2030"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-700 mb-1">Start Month</label>
+              <select
+                value={startMonth}
+                onChange={(e) => setStartMonth(e.target.value)}
+                className="w-full px-2 py-1 border border-gray-300 text-sm focus:outline-none focus:border-blue-500"
+              >
+                <option value="">Select Month</option>
+                {MONTHS.map(month => (
+                  <option key={month} value={month}>{month}</option>
+                ))}
+              </select>
+            </div>
+          </div>
+        </div>
+        
+        {/* Spreadsheet-like Table */}
+        <div className="overflow-x-auto">
+          <table className="w-full border-collapse min-w-[1200px]">
+            {/* Month Headers */}
+            <thead>
+              <tr className="bg-blue-50">
+                <th className="border border-gray-300 px-2 py-2 text-xs font-medium text-gray-700 w-32">Elevator</th>
+                <th className="border border-gray-300 px-2 py-2 text-xs font-medium text-gray-700 w-32">Town</th>
                 {Array.from({ length: 6 }, (_, index) => (
-                  <th key={index} className="border border-gray-300 px-3 py-2 text-center text-xs font-medium text-gray-500 uppercase bg-tg-primary bg-opacity-20">
+                  <th key={index} className="border border-gray-300 px-2 py-2 text-xs font-medium text-gray-700 w-24">
                     <select
                       value={entryMonths[index]}
                       onChange={(e) => updateEntryMonth(index, e.target.value)}
-                      className="w-full px-1 py-1 border border-gray-300 rounded text-xs bg-white"
+                      className="w-full px-1 py-0.5 border-0 bg-transparent text-xs font-medium focus:outline-none focus:bg-white focus:border focus:border-blue-500"
                     >
                       <option value="">Month</option>
                       {MONTHS.map(month => (
@@ -337,105 +383,56 @@ export const GrainEntriesPage: React.FC = () => {
                     </select>
                   </th>
                 ))}
+                <th className="border border-gray-300 px-1 py-2 text-xs font-medium text-gray-700 w-8"></th>
               </tr>
-              <tr>
-                <th className="border border-gray-300 px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase bg-tg-primary bg-opacity-10">
-                  Date
-                </th>
-                <th className="border border-gray-300 px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase bg-tg-primary bg-opacity-10">
-                  Crop
-                </th>
+              {/* Year Headers */}
+              <tr className="bg-blue-50">
+                <th className="border border-gray-300 px-2 py-1 text-xs font-medium text-gray-700"></th>
+                <th className="border border-gray-300 px-2 py-1 text-xs font-medium text-gray-700"></th>
                 {Array.from({ length: 6 }, (_, index) => (
-                  <th key={index} className="border border-gray-300 px-3 py-2 text-center text-xs font-medium text-gray-500 uppercase bg-tg-primary bg-opacity-10">
+                  <th key={index} className="border border-gray-300 px-2 py-1 text-xs font-medium text-gray-700">
                     <input
                       type="number"
                       value={entryYears[index] || ''}
                       onChange={(e) => updateEntryYear(index, parseInt(e.target.value) || 0)}
-                      className="w-full px-1 py-1 border border-gray-300 rounded text-xs text-center bg-white"
+                      className="w-full px-1 py-0.5 border-0 bg-transparent text-xs font-medium text-center focus:outline-none focus:bg-white focus:border focus:border-blue-500"
                       placeholder="Year"
                       min="2020"
                       max="2030"
                     />
                   </th>
                 ))}
+                <th className="border border-gray-300 px-1 py-1 text-xs font-medium text-gray-700"></th>
               </tr>
-              <tr className="bg-gray-100">
-                <th className="border border-gray-300 px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase">
-                  Date
-                </th>
-                <th className="border border-gray-300 px-3 py-3 text-left text-xs font-medium text-gray-500 uppercase">
-                  Crop
-                </th>
+              {/* Futures Row */}
+              <tr className="bg-yellow-50">
+                <th className="border border-gray-300 px-2 py-2 text-xs font-medium text-gray-700">Futures Prices</th>
+                <th className="border border-gray-300 px-2 py-2 text-xs font-medium text-gray-700"></th>
                 {Array.from({ length: 6 }, (_, index) => (
-                  <th key={index} className="border border-gray-300 px-3 py-3 text-center text-xs font-medium text-gray-500 uppercase bg-tg-primary bg-opacity-30">
-                    Futures
-                  </th>
-                ))}
-              </tr>
-              <tr className="bg-gray-100">
-                <td className="border border-gray-300 px-3 py-3 bg-tg-primary bg-opacity-20">
-                  <input
-                    type="date"
-                    value={entryDate}
-                    onChange={(e) => setEntryDate(e.target.value)}
-                    className="w-full px-2 py-2 border border-gray-300 rounded text-sm"
-                  />
-                </td>
-                <td className="border border-gray-300 px-3 py-3 bg-tg-primary bg-opacity-20">
-                  <select
-                    value={entryCrop}
-                    onChange={(e) => setEntryCrop(e.target.value)}
-                    className="w-full px-2 py-2 border border-gray-300 rounded text-sm"
-                  >
-                    <option value="">Select Crop</option>
-                    {crops.map(crop => (
-                      <option key={crop.id} value={crop.id}>{crop.name}</option>
-                    ))}
-                  </select>
-                </td>
-                {Array.from({ length: 6 }, (_, index) => (
-                  <td key={index} className="border border-gray-300 px-3 py-3 bg-tg-primary bg-opacity-10">
+                  <th key={index} className="border border-gray-300 px-2 py-2 text-xs font-medium text-gray-700">
                     <input
                       type="number"
                       step="0.01"
                       value={entryFutures[index]}
                       onChange={(e) => updateEntryFutures(index, e.target.value)}
-                      className="w-full px-2 py-2 border border-gray-300 rounded text-sm text-right"
+                      className="w-full px-1 py-1 border-0 bg-transparent text-xs text-right focus:outline-none focus:bg-white focus:border focus:border-blue-500"
                       placeholder="0.00"
                     />
-                  </td>
-                ))}
-              </tr>
-              <tr className="bg-gray-50">
-                <th className="border border-gray-300 px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase">
-                  Elevator
-                </th>
-                <th className="border border-gray-300 px-2 py-2 text-left text-xs font-medium text-gray-500 uppercase">
-                  Town
-                </th>
-                {Array.from({ length: 6 }, (_, index) => (
-                  <th key={index} className="border border-gray-300 px-2 py-2 text-center text-xs font-medium text-gray-500 uppercase bg-tg-primary bg-opacity-40">
-                    <div className="text-center">
-                      {entryMonths[index] && entryYears[index] ? 
-                        `${entryMonths[index]} ${entryYears[index]}` : 
-                        'Month Year'
-                      }
-                    </div>
                   </th>
                 ))}
-                <th className="border border-gray-300 px-1 py-2 text-center text-xs font-medium text-gray-500 uppercase" style={{ width: '40px' }}>
-                  Del
-                </th>
+                <th className="border border-gray-300 px-1 py-2 text-xs font-medium text-gray-700"></th>
               </tr>
             </thead>
-            <tbody className="bg-white">
-              {entryRows.map((row) => (
-                <tr key={row.id} className="hover:bg-gray-50">
-                  <td className="border border-gray-300 px-2 py-3">
+            
+            {/* Data Rows */}
+            <tbody>
+              {entryRows.map((row, rowIndex) => (
+                <tr key={row.id} className={rowIndex % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
+                  <td className="border border-gray-300 px-1 py-1">
                     <select
                       value={row.elevator_id}
                       onChange={(e) => updateEntryRow(row.id, 'elevator_id', e.target.value)}
-                      className="w-full px-2 py-1 border border-gray-300 rounded text-sm"
+                      className="w-full px-1 py-1 border-0 bg-transparent text-xs focus:outline-none focus:bg-white focus:border focus:border-blue-500"
                     >
                       <option value="">Select Elevator</option>
                       {elevators.map(elevator => (
@@ -443,11 +440,11 @@ export const GrainEntriesPage: React.FC = () => {
                       ))}
                     </select>
                   </td>
-                  <td className="border border-gray-300 px-2 py-3">
+                  <td className="border border-gray-300 px-1 py-1">
                     <select
                       value={row.town_id}
                       onChange={(e) => updateEntryRow(row.id, 'town_id', e.target.value)}
-                      className="w-full px-2 py-1 border border-gray-300 rounded text-sm"
+                      className="w-full px-1 py-1 border-0 bg-transparent text-xs focus:outline-none focus:bg-white focus:border focus:border-blue-500"
                     >
                       <option value="">Select Town</option>
                       {towns.map(town => (
@@ -456,22 +453,22 @@ export const GrainEntriesPage: React.FC = () => {
                     </select>
                   </td>
                   {Array.from({ length: 6 }, (_, index) => (
-                    <td key={index} className="border border-gray-300 px-2 py-3">
+                    <td key={index} className="border border-gray-300 px-1 py-1">
                       <input
                         type="number"
                         step="0.01"
                         value={row.cash_prices[index]}
                         onChange={(e) => updateCashPrice(row.id, index, e.target.value)}
-                        className="w-full px-2 py-2 border border-gray-300 rounded text-sm text-right"
+                        className="w-full px-1 py-1 border-0 bg-transparent text-xs text-right focus:outline-none focus:bg-white focus:border focus:border-blue-500"
                         placeholder="0.00"
                       />
                     </td>
                   ))}
-                  <td className="border border-gray-300 px-3 py-3 text-center">
+                  <td className="border border-gray-300 px-1 py-1 text-center">
                     {entryRows.length > 1 && (
                       <button
                         onClick={() => removeEntryRow(row.id)}
-                        className="text-red-600 hover:text-red-800 p-1"
+                        className="text-red-600 hover:text-red-800 p-0.5"
                       >
                         <Trash2 className="h-3 w-3" />
                       </button>
@@ -483,14 +480,24 @@ export const GrainEntriesPage: React.FC = () => {
           </table>
         </div>
         
-        <div className="p-4 bg-gray-50 border-t flex justify-between">
-          <div className="text-sm text-gray-600">
-            Rows auto-add when you select both elevator and town
+        {/* Footer */}
+        <div className="px-4 py-3 border-t border-gray-300 bg-gray-50 flex justify-between items-center">
+          <div className="flex items-center gap-4">
+            <button
+              onClick={addEntryRow}
+              className="flex items-center px-3 py-1 text-xs text-blue-600 hover:text-blue-800 border border-blue-300 hover:border-blue-500"
+            >
+              <Plus className="h-3 w-3 mr-1" />
+              Add Row
+            </button>
+            <div className="text-xs text-gray-600">
+              Rows auto-add when you enter data. Use Tab to navigate quickly.
+            </div>
           </div>
           <button
             onClick={handleSaveEntries}
             disabled={!entryDate || !entryCrop}
-            className="flex items-center px-6 py-2 bg-tg-primary text-gray-900 rounded-md hover:bg-opacity-80 disabled:opacity-50 disabled:cursor-not-allowed font-medium"
+            className="flex items-center px-4 py-2 bg-tg-primary text-gray-900 hover:bg-opacity-80 disabled:opacity-50 disabled:cursor-not-allowed font-medium text-sm"
           >
             <Save className="h-4 w-4 mr-2" />
             Save Entries
@@ -499,28 +506,28 @@ export const GrainEntriesPage: React.FC = () => {
       </div>
 
       {/* Search and Filters for Existing Entries */}
-      <div className="bg-white p-4 rounded-lg shadow">
+      <div className="bg-white p-4 border border-gray-300">
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Search</label>
+            <label className="block text-xs font-medium text-gray-700 mb-1">Search</label>
             <div className="relative">
-              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
+              <Search className="absolute left-2 top-1/2 transform -translate-y-1/2 h-3 w-3 text-gray-400" />
               <input
                 type="text"
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
-                className="pl-10 w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-tg-primary focus:border-tg-primary"
+                className="pl-7 w-full px-2 py-1 border border-gray-300 text-xs focus:outline-none focus:border-blue-500"
                 placeholder="Search entries..."
               />
             </div>
           </div>
           
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Crop</label>
+            <label className="block text-xs font-medium text-gray-700 mb-1">Crop</label>
             <select
               value={filters.crop_id || ''}
               onChange={(e) => handleFilterChange('crop_id', e.target.value)}
-              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-tg-primary focus:border-tg-primary"
+              className="w-full px-2 py-1 border border-gray-300 text-xs focus:outline-none focus:border-blue-500"
             >
               <option value="">All Crops</option>
               {crops.map(crop => (
@@ -530,11 +537,11 @@ export const GrainEntriesPage: React.FC = () => {
           </div>
           
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Elevator</label>
+            <label className="block text-xs font-medium text-gray-700 mb-1">Elevator</label>
             <select
               value={filters.elevator_id || ''}
               onChange={(e) => handleFilterChange('elevator_id', e.target.value)}
-              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-tg-primary focus:border-tg-primary"
+              className="w-full px-2 py-1 border border-gray-300 text-xs focus:outline-none focus:border-blue-500"
             >
               <option value="">All Elevators</option>
               {elevators.map(elevator => (
@@ -544,11 +551,11 @@ export const GrainEntriesPage: React.FC = () => {
           </div>
           
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">Town</label>
+            <label className="block text-xs font-medium text-gray-700 mb-1">Town</label>
             <select
               value={filters.town_id || ''}
               onChange={(e) => handleFilterChange('town_id', e.target.value)}
-              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-tg-primary focus:border-tg-primary"
+              className="w-full px-2 py-1 border border-gray-300 text-xs focus:outline-none focus:border-blue-500"
             >
               <option value="">All Towns</option>
               {towns.map(town => (
@@ -560,7 +567,7 @@ export const GrainEntriesPage: React.FC = () => {
           <div className="flex items-end">
             <button
               onClick={handleSearch}
-              className="w-full px-4 py-2 bg-tg-primary text-gray-900 rounded-md hover:bg-opacity-80 font-medium"
+              className="w-full px-3 py-1 bg-tg-primary text-gray-900 hover:bg-opacity-80 font-medium text-xs"
             >
               Search
             </button>
@@ -569,17 +576,17 @@ export const GrainEntriesPage: React.FC = () => {
       </div>
 
       {/* Existing Entries Table */}
-      <div className="bg-white rounded-lg shadow overflow-hidden">
-        <div className="p-4 border-b bg-gray-50">
-          <h2 className="text-lg font-semibold text-gray-900">Existing Entries</h2>
+      <div className="bg-white border border-gray-300 overflow-hidden">
+        <div className="px-4 py-3 border-b border-gray-300 bg-gray-100">
+          <h2 className="text-lg font-semibold text-gray-900">Existing Entries ({filteredEntries.length})</h2>
         </div>
         
         <div className="overflow-x-auto">
-          <table className="min-w-full divide-y divide-gray-200">
-            <thead className="bg-gray-50 sticky top-0">
+          <table className="w-full border-collapse">
+            <thead className="bg-gray-50">
               <tr>
                 <th 
-                  className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100"
+                  className="border border-gray-300 px-3 py-2 text-left text-xs font-medium text-gray-700 cursor-pointer hover:bg-gray-100"
                   onClick={() => handleSort('date')}
                 >
                   <div className="flex items-center">
@@ -588,7 +595,7 @@ export const GrainEntriesPage: React.FC = () => {
                   </div>
                 </th>
                 <th 
-                  className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:bg-gray-100"
+                  className="border border-gray-300 px-3 py-2 text-left text-xs font-medium text-gray-700 cursor-pointer hover:bg-gray-100"
                   onClick={() => handleSort('master_crops.name')}
                 >
                   <div className="flex items-center">
@@ -596,69 +603,69 @@ export const GrainEntriesPage: React.FC = () => {
                     <ArrowUpDown className="ml-1 h-3 w-3" />
                   </div>
                 </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                <th className="border border-gray-300 px-3 py-2 text-left text-xs font-medium text-gray-700">
                   Elevator
                 </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                <th className="border border-gray-300 px-3 py-2 text-left text-xs font-medium text-gray-700">
                   Town
                 </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                <th className="border border-gray-300 px-3 py-2 text-left text-xs font-medium text-gray-700">
                   Month/Year
                 </th>
-                <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
+                <th className="border border-gray-300 px-3 py-2 text-right text-xs font-medium text-gray-700">
                   Cash Price
                 </th>
-                <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
+                <th className="border border-gray-300 px-3 py-2 text-right text-xs font-medium text-gray-700">
                   Futures
                 </th>
-                <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">
+                <th className="border border-gray-300 px-3 py-2 text-right text-xs font-medium text-gray-700">
                   Basis
                 </th>
-                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                <th className="border border-gray-300 px-3 py-2 text-center text-xs font-medium text-gray-700">
                   Actions
                 </th>
               </tr>
             </thead>
-            <tbody className="bg-white divide-y divide-gray-200">
-              {filteredEntries.map((entry) => (
-                <tr key={entry.id} className="hover:bg-gray-50">
-                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+            <tbody>
+              {filteredEntries.map((entry, index) => (
+                <tr key={entry.id} className={index % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
+                  <td className="border border-gray-300 px-3 py-2 text-xs text-gray-900">
                     {new Date(entry.date).toLocaleDateString()}
                   </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                  <td className="border border-gray-300 px-3 py-2 text-xs text-gray-900">
                     {entry.master_crops?.name}
                   </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                  <td className="border border-gray-300 px-3 py-2 text-xs text-gray-900">
                     {entry.master_elevators?.name}
                   </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                  <td className="border border-gray-300 px-3 py-2 text-xs text-gray-900">
                     {entry.master_towns?.name}
                   </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                  <td className="border border-gray-300 px-3 py-2 text-xs text-gray-900">
                     {entry.month} {entry.year}
                   </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 text-right">
-                    {entry.cash_price ? `$${entry.cash_price.toFixed(2)}` : '-'}
+                  <td className="border border-gray-300 px-3 py-2 text-xs text-gray-900 text-right font-mono">
+                    {formatPrice(entry.cash_price)}
                   </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 text-right">
-                    {entry.futures ? `$${entry.futures.toFixed(2)}` : '-'}
+                  <td className="border border-gray-300 px-3 py-2 text-xs text-gray-900 text-right font-mono">
+                    {formatPrice(entry.futures)}
                   </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 text-right font-medium">
+                  <td className="border border-gray-300 px-3 py-2 text-xs text-gray-900 text-right font-mono font-medium">
                     {calculateBasis(entry.cash_price, entry.futures)}
                   </td>
-                  <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
+                  <td className="border border-gray-300 px-3 py-2 text-center">
                     <button
                       onClick={() => handleDeleteEntry(entry.id)}
-                      className="text-red-600 hover:text-red-900"
+                      className="text-red-600 hover:text-red-900 p-1"
                     >
-                      <Trash2 className="h-4 w-4" />
+                      <Trash2 className="h-3 w-3" />
                     </button>
                   </td>
                 </tr>
               ))}
               {filteredEntries.length === 0 && (
                 <tr>
-                  <td colSpan={9} className="px-6 py-4 text-center text-gray-500">
+                  <td colSpan={9} className="border border-gray-300 px-6 py-8 text-center text-gray-500 text-sm">
                     No entries found
                   </td>
                 </tr>
