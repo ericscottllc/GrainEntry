@@ -711,8 +711,6 @@ export const GrainEntriesPage: React.FC = () => {
         </div>
       </div>
         </div>
-      </div>
-    </div>
 
       {/* Existing Entries Table */}
       <div className="bg-white border border-gray-300 overflow-hidden">
