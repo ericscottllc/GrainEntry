@@ -414,7 +414,9 @@ export const GrainEntriesPage: React.FC = () => {
   }
 
   return (
-    <div className="space-y-6 p-6">
+    <div className="h-full flex flex-col">
+      <div className="flex-1 overflow-auto">
+        <div className="space-y-6 p-6">
       <h1 className="text-2xl font-bold text-gray-900">Grain Entries</h1>
 
       {/* Toast */}
@@ -708,6 +710,9 @@ export const GrainEntriesPage: React.FC = () => {
           </div>
         </div>
       </div>
+        </div>
+      </div>
+    </div>
 
       {/* Existing Entries Table */}
       <div className="bg-white border border-gray-300 overflow-hidden">
