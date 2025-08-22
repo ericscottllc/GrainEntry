@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { motion } from 'framer-motion';
-import { Plus, Trash2, Search, Calendar, Grain, Save, Loader } from 'lucide-react';
+import { Plus, Trash2, Search, Calendar, Brain as Grain, Save, Loader } from 'lucide-react';
 import { useNotifications } from '../../contexts/NotificationContext';
 import { supabase } from '../../lib/supabase';
 import { Button, Input, Card } from '../../components/Shared/SharedComponents';
