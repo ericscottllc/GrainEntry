@@ -1,10 +1,41 @@
 import { supabase } from './supabase';
 
 // Types
+export interface CropClass {
+  id: string;
+  crop_id: string;
+  name: string;
+  code: string;
+  description: string;
+  is_active: boolean;
+  master_crops?: { name: string; code: string };
+}
+
+export interface MasterRegion {
+  id: string;
+  name: string;
+  code: string;
+  is_active: boolean;
+}
+
+export interface RegionAssociation {
+  id: string;
+  region_id: string;
+  elevator_id: string;
+  town_id: string;
+  class_id: string;
+  crop_comparison_id: string;
+  is_active: boolean;
+  master_elevators?: { name: string; code: string };
+  master_towns?: { name: string; province: string };
+  master_regions?: { name: string; code: string };
+  crop_classes?: { name: string; code: string };
+}
+
 export interface GrainEntry {
   id: string;
   date: string;
-  crop_id: string;
+  class_id: string;
   elevator_id: string;
   town_id: string;
   month: string;
@@ -15,14 +46,18 @@ export interface GrainEntry {
   is_active: boolean;
   created_at: string;
   updated_at: string;
-  master_crops?: { name: string; code: string };
+  crop_classes?: { 
+    name: string; 
+    code: string;
+    master_crops?: { name: string; code: string };
+  };
   master_elevators?: { name: string; code: string };
   master_towns?: { name: string; province: string };
 }
 
 export interface GrainEntryInsert {
   date: string;
-  crop_id: string;
+  class_id: string;
   elevator_id: string;
   town_id: string;
   month: string;
@@ -33,9 +68,10 @@ export interface GrainEntryInsert {
 }
 
 export interface GrainEntryFilters {
-  crop_id?: string;
+  class_id?: string;
   elevator_id?: string;
   town_id?: string;
+  region_id?: string;
   month?: string;
   year?: number;
   date_from?: string;
@@ -45,13 +81,6 @@ export interface GrainEntryFilters {
 export interface SortConfig {
   field: string;
   direction: 'asc' | 'desc';
-}
-
-export interface MasterCrop {
-  id: string;
-  name: string;
-  code: string;
-  is_active: boolean;
 }
 
 export interface MasterElevator {
@@ -77,15 +106,19 @@ export const listEntries = async (
     .from('grain_entries')
     .select(`
       *,
-      master_crops!inner(name, code),
+      crop_classes!inner(
+        name, 
+        code,
+        master_crops!inner(name, code)
+      ),
       master_elevators!inner(name, code),
       master_towns!inner(name, province)
     `)
     .eq('is_active', true);
 
   // Apply filters
-  if (filters.crop_id) {
-    query = query.eq('crop_id', filters.crop_id);
+  if (filters.class_id) {
+    query = query.eq('class_id', filters.class_id);
   }
   if (filters.elevator_id) {
     query = query.eq('elevator_id', filters.elevator_id);
@@ -108,8 +141,8 @@ export const listEntries = async (
 
   // Apply sorting
   const ascending = sort.direction === 'asc';
-  if (sort.field === 'master_crops.name') {
-    query = query.order('name', { ascending, foreignTable: 'master_crops' });
+  if (sort.field === 'crop_classes.name') {
+    query = query.order('name', { ascending, foreignTable: 'crop_classes' });
   } else {
     query = query.order(sort.field, { ascending });
   }
@@ -147,15 +180,66 @@ export const softDeleteEntry = async (id: string): Promise<void> => {
   }
 };
 
-export const listCrops = async (): Promise<MasterCrop[]> => {
+export const listCropClasses = async (): Promise<CropClass[]> => {
   const { data, error } = await supabase
-    .from('master_crops')
+    .from('crop_classes')
+    .select(`
+      *,
+      master_crops!inner(name, code)
+    `)
+    .eq('is_active', true)
+    .order('name');
+
+  if (error) {
+    console.error('Error fetching crop classes:', error);
+    throw error;
+  }
+
+  return data || [];
+};
+
+export const listRegions = async (): Promise<MasterRegion[]> => {
+  const { data, error } = await supabase
+    .from('master_regions')
     .select('*')
     .eq('is_active', true)
     .order('name');
 
   if (error) {
-    console.error('Error fetching crops:', error);
+    console.error('Error fetching regions:', error);
+    throw error;
+  }
+
+  return data || [];
+};
+
+export const listRegionAssociations = async (
+  regionId?: string, 
+  classId?: string
+): Promise<RegionAssociation[]> => {
+  let query = supabase
+    .from('region_associations')
+    .select(`
+      *,
+      master_elevators!inner(name, code),
+      master_towns!inner(name, province),
+      master_regions!inner(name, code),
+      crop_classes!inner(name, code)
+    `)
+    .eq('is_active', true);
+
+  if (regionId) {
+    query = query.eq('region_id', regionId);
+  }
+
+  if (classId) {
+    query = query.eq('class_id', classId);
+  }
+
+  const { data, error } = await query.order('master_elevators.name');
+
+  if (error) {
+    console.error('Error fetching region associations:', error);
     throw error;
   }
 
