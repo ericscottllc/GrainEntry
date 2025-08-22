@@ -236,7 +236,7 @@ export const listRegionAssociations = async (
     query = query.eq('class_id', classId);
   }
 
-  const { data, error } = await query.order('master_elevators.name');
+  const { data, error } = await query.order('master_elevators(name)');
 
   if (error) {
     console.error('Error fetching region associations:', error);
@@ -244,6 +244,38 @@ export const listRegionAssociations = async (
   }
 
   return data || [];
+};
+
+export const listRegionsByClass = async (classId: string): Promise<MasterRegion[]> => {
+  const { data, error } = await supabase
+    .from('region_associations')
+    .select(`
+      master_regions!inner(
+        id,
+        name,
+        code,
+        is_active
+      )
+    `)
+    .eq('is_active', true)
+    .eq('class_id', classId)
+    .eq('master_regions.is_active', true);
+
+  if (error) {
+    console.error('Error fetching regions by class:', error);
+    throw error;
+  }
+
+  // Extract unique regions from the associations
+  const uniqueRegions = new Map();
+  data?.forEach(item => {
+    const region = item.master_regions;
+    if (region && !uniqueRegions.has(region.id)) {
+      uniqueRegions.set(region.id, region);
+    }
+  });
+
+  return Array.from(uniqueRegions.values()).sort((a, b) => a.name.localeCompare(b.name));
 };
 
 export const listElevators = async (): Promise<MasterElevator[]> => {
