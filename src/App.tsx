@@ -10,6 +10,7 @@ import { Sidebar } from './components/Core/Sidebar';
 import { MainContent } from './components/Core/MainContent';
 import { CodeExplorer } from './CodeExplorer';
 import { SchemaExplorer } from './SchemaExplorer';
+import { GrainEntriesPage } from './pages/grainEntries';
 import { NavigationItem } from './types/navigation';
 
 const AppContent: React.FC = () => {
@@ -69,6 +70,23 @@ const AppContent: React.FC = () => {
     }
   };
 
+  // Render page content based on active item
+  const renderPageContent = () => {
+    if (!activeNavItem) return null;
+    
+    // Check if this should show local content
+    if (!activeNavItem.redirect_active) {
+      switch (activeNavItem.title.toLowerCase().replace(/\s+/g, '-')) {
+        case 'grain-entries':
+          return <GrainEntriesPage />;
+        default:
+          return <MainContent activeNavItem={activeNavItem} onNavigate={handleNavigate} />;
+      }
+    }
+    
+    return <MainContent activeNavItem={activeNavItem} onNavigate={handleNavigate} />;
+  };
+
   return (
     <>
     <motion.div
@@ -87,7 +105,7 @@ const AppContent: React.FC = () => {
           transition={{ duration: 0.3 }}
           className="flex-1"
         >
-          <MainContent activeNavItem={activeNavItem} onNavigate={handleNavigate} />
+          {renderPageContent()}
         </motion.div>
       </AnimatePresence>
     </motion.div>
