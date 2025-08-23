@@ -52,9 +52,37 @@ export const NewEntriesTab: React.FC<NewEntriesTabProps> = ({ onShowToast, onEnt
   const [isAutoPopulating, setIsAutoPopulating] = useState(true);
   const [validationErrors, setValidationErrors] = useState<ValidationError[]>([]);
   const [showValidationErrors, setShowValidationErrors] = useState(false);
-
+  
   // Get selected crop class for crop_id
   const selectedCropClass = cropClasses.find(cc => cc.id === entryCropClass);
+
+  // Real-time validation for highlighting
+  const realtimeValidation = React.useMemo(() => {
+    // Only run real-time validation if user has started interacting with the form
+    const hasInteracted = entryDate !== new Date().toISOString().split('T')[0] || 
+                         entryCropClass !== '' || 
+                         entryMonths.some(m => m !== '') || 
+                         entryYears.some(y => y !== 0) ||
+                         entryRows.some(row => row.elevator_id !== '' || row.town_id !== '' || row.cash_prices.some(p => p !== ''));
+    
+    if (!hasInteracted) {
+      return {
+        isValid: true,
+        errors: [],
+        entries: []
+      };
+    }
+    
+    return validateAndPrepareEntries(
+      entryDate,
+      entryCropClass,
+      selectedCropClass?.crop_id || '',
+      entryMonths,
+      entryYears,
+      entryFutures,
+      entryRows
+    );
+  }, [entryDate, entryCropClass, selectedCropClass?.crop_id, entryMonths, entryYears, entryFutures, entryRows]);
 
   const loadData = async () => {
     try {
@@ -237,6 +265,18 @@ export const NewEntriesTab: React.FC<NewEntriesTabProps> = ({ onShowToast, onEnt
     setTimeout(() => setIsAutoPopulating(true), 100); // Re-enable after update
   };
 
+  // Function to reset the form fields
+  const resetForm = () => {
+    console.log("🔄 Resetting form fields...");
+    setEntryDate(new Date().toISOString().split('T')[0]);
+    setEntryCropClass('');
+    setEntryRegion('');
+    setEntryMonths(['', '', '', '', '', '']);
+    setEntryYears([0, 0, 0, 0, 0, 0]);
+    setEntryFutures(['', '', '', '', '', '']);
+    setEntryRows([{ id: '1', elevator_id: '', town_id: '', cash_prices: ['', '', '', '', '', ''] }]);
+  };
+
   const updateEntryMonth = (index: number, value: string) => {
     const currentYear = entryYears[index];
     if (value && currentYear) {
@@ -320,8 +360,6 @@ export const NewEntriesTab: React.FC<NewEntriesTabProps> = ({ onShowToast, onEnt
   const handleSaveEntries = async () => {
     try {
       // Clear previous validation errors
-      setValidationErrors([]);
-      setShowValidationErrors(false);
       
       // Get the selected crop class to extract crop_id
       const selectedCropClass = cropClasses.find(cc => cc.id === entryCropClass);
@@ -342,40 +380,64 @@ export const NewEntriesTab: React.FC<NewEntriesTabProps> = ({ onShowToast, onEnt
       );
       
       if (!validation.isValid) {
+        // Set validation errors to show highlighting
         setValidationErrors(validation.errors);
         setShowValidationErrors(true);
-        onShowToast('Please fix the highlighted fields', 'error');
+        console.log("❌ Validation failed. Form will NOT clear.");
+        onShowToast(`Please fix the highlighted fields (${validation.errors.length} issues found)`, 'error');
         return;
       }
       
+      console.log("Attempting to insert entries into database...");
       await insertEntries(validation.entries);
       
-      // Clear form
-      setEntryDate(new Date().toISOString().split('T')[0]);
-      setEntryCropClass('');
-      setEntryRegion('');
-      setEntryMonths(['', '', '', '', '', '']);
-      setEntryYears([0, 0, 0, 0, 0, 0]);
-      setEntryFutures(['', '', '', '', '', '']);
-      setEntryRows([{ id: '1', elevator_id: '', town_id: '', cash_prices: ['', '', '', '', '', ''] }]);
+      console.log("✅ Entries inserted successfully. Resetting form.");
+      // Clear validation errors before resetting form
+      setValidationErrors([]);
+      setShowValidationErrors(false);
+      resetForm(); // Only reset form on successful save
       
       onEntriesAdded();
       onShowToast(`${validation.entries.length} entries saved successfully`, 'success');
     } catch (error) {
+      console.error('❌ Save Error (caught):', error);
+      console.log("Form will NOT clear due to error.");
+      // Don't clear validation errors on save error - keep them for user to see
+      // setValidationErrors([]);
+      // setShowValidationErrors(false);
       onShowToast('Failed to save entries', 'error');
     }
   };
 
   // Get field errors for highlighting
-  const fieldErrors = getFieldErrors(
-    validationErrors,
-    entryDate,
-    entryCropClass,
-    selectedCropClass?.crop_id || '',
-    entryMonths,
-    entryYears,
-    entryRows
-  );
+  const fieldErrors = React.useMemo(() => {
+    // Use real-time validation for highlighting, but submission validation for error popup
+    const errorsToUse = showValidationErrors ? validationErrors : realtimeValidation.errors;
+    
+    if (errorsToUse.length === 0) {
+      return {
+        date: false,
+        cropClass: false,
+        monthYear: false,
+        rows: false,
+        cashPrices: false,
+        monthYearErrors: new Array(6).fill(false),
+        rowErrors: new Array(entryRows.length).fill(false),
+        cashPriceErrors: entryRows.map(() => new Array(6).fill(false))
+      };
+    }
+    
+    const errors = getFieldErrors(
+      errorsToUse,
+      entryDate,
+      entryCropClass,
+      selectedCropClass?.crop_id || '',
+      entryMonths,
+      entryYears,
+      entryRows
+    );
+    return errors;
+  }, [realtimeValidation.errors, validationErrors, showValidationErrors, entryDate, entryCropClass, selectedCropClass?.crop_id, entryMonths, entryYears, entryRows]);
 
   if (loading) {
     return (
@@ -388,13 +450,13 @@ export const NewEntriesTab: React.FC<NewEntriesTabProps> = ({ onShowToast, onEnt
   return (
     <div className="space-y-6 p-6">
       {/* Validation Error Display */}
-      <ValidationErrorDisplay 
+      {showValidationErrors && <ValidationErrorDisplay 
         errors={validationErrors}
         onClose={() => {
           setValidationErrors([]);
           setShowValidationErrors(false);
         }}
-      />
+      />}
 
       {/* Entry Form */}
       <div className="bg-white border border-gray-300 overflow-hidden">
@@ -412,7 +474,9 @@ export const NewEntriesTab: React.FC<NewEntriesTabProps> = ({ onShowToast, onEnt
                   type="date"
                   value={entryDate}
                   onChange={(e) => setEntryDate(e.target.value)}
-                  className="w-full px-2 py-1 border border-gray-300 text-sm focus:outline-none focus:border-blue-500"
+                  className={`w-full px-2 py-1 border text-sm focus:outline-none focus:border-blue-500 ${
+                    fieldErrors.date ? 'border-red-500 bg-red-50' : 'border-gray-300'
+                  }`}
                 />
               </FieldWithError>
             </div>
@@ -422,7 +486,9 @@ export const NewEntriesTab: React.FC<NewEntriesTabProps> = ({ onShowToast, onEnt
                 <select
                   value={entryCropClass}
                   onChange={(e) => setEntryCropClass(e.target.value)}
-                  className="w-full px-2 py-1 border border-gray-300 text-sm focus:outline-none focus:border-blue-500"
+                  className={`w-full px-2 py-1 border text-sm focus:outline-none focus:border-blue-500 ${
+                    fieldErrors.cropClass ? 'border-red-500 bg-red-50' : 'border-gray-300'
+                  }`}
                 >
                   <option value="">Select Crop Class</option>
                   {cropClasses.map(cropClass => (
@@ -469,7 +535,9 @@ export const NewEntriesTab: React.FC<NewEntriesTabProps> = ({ onShowToast, onEnt
                         type="number"
                         value={entryYears[index] || ''}
                         onChange={(e) => updateEntryYear(index, parseInt(e.target.value) || 0)}
-                        className="w-full px-1 py-0.5 border-0 bg-transparent text-xs font-medium text-center focus:outline-none focus:bg-white focus:border focus:border-blue-500"
+                        className={`w-full px-1 py-0.5 border-0 text-xs font-medium text-center focus:outline-none focus:bg-white focus:border focus:border-blue-500 ${
+                          fieldErrors.monthYearErrors[index] ? 'bg-red-50 text-red-700' : 'bg-transparent'
+                        }`}
                         placeholder="Year"
                         min="2020"
                         max="2030"
@@ -489,7 +557,9 @@ export const NewEntriesTab: React.FC<NewEntriesTabProps> = ({ onShowToast, onEnt
                       <select
                         value={entryMonths[index]}
                         onChange={(e) => updateEntryMonth(index, e.target.value)}
-                        className="w-full px-1 py-0.5 border-0 bg-transparent text-xs font-medium focus:outline-none focus:bg-white focus:border focus:border-blue-500"
+                        className={`w-full px-1 py-0.5 border-0 text-xs font-medium focus:outline-none focus:bg-white focus:border focus:border-blue-500 ${
+                          fieldErrors.monthYearErrors[index] ? 'bg-red-50 text-red-700' : 'bg-transparent'
+                        }`}
                       >
                         <option value="">Month</option>
                         {MONTHS.map(month => (

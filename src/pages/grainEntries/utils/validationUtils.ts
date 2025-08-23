@@ -32,6 +32,15 @@ export const validateAndPrepareEntries = (
   const errors: ValidationError[] = [];
   const entriesToInsert: GrainEntryInsert[] = [];
 
+  // Simple logging of what user submitted
+  console.log('📝 Form Submission:', {
+    date: entryDate,
+    cropClass: entryCropClass ? 'Selected' : 'Missing',
+    monthsYears: entryMonths.map((month, i) => month && entryYears[i] ? `${month} ${entryYears[i]}` : 'Empty').filter(x => x !== 'Empty'),
+    rowsWithData: entryRows.filter(row => row.elevator_id && row.town_id).length,
+    totalCashPrices: entryRows.reduce((sum, row) => sum + row.cash_prices.filter(price => price && parseFloat(price)).length, 0)
+  });
+
   // Validate basic required fields
   if (!entryDate) {
     errors.push({
@@ -83,6 +92,7 @@ export const validateAndPrepareEntries = (
 
   // If basic validation fails, return early
   if (errors.length > 0) {
+    console.log('❌ Missing Fields:', errors.map(e => e.message));
     return {
       isValid: false,
       errors,
@@ -143,6 +153,11 @@ export const validateAndPrepareEntries = (
       field: 'cashPrices',
       message: 'At least one cash price must be entered for a valid elevator/town combination'
     });
+    console.log('❌ Missing Fields:', errors.map(e => e.message));
+  }
+
+  if (errors.length === 0) {
+    console.log('✅ Validation Passed - Ready to save', entriesToInsert.length, 'entries');
   }
 
   return {
