@@ -73,9 +73,23 @@ export const listEntries = async (
 };
 
 export const insertEntries = async (entries: GrainEntryInsert[]): Promise<void> => {
+  // Get the current authenticated user
+  const { data: { user }, error: userError } = await supabase.auth.getUser();
+  
+  if (userError || !user) {
+    console.error('Error getting authenticated user:', userError);
+    throw new Error('User must be authenticated to create entries');
+  }
+
+  // Add user_id to each entry
+  const entriesWithUserId = entries.map(entry => ({
+    ...entry,
+    user_id: user.id
+  }));
+
   const { error } = await supabase
     .from('grain_entries')
-    .insert(entries);
+    .insert(entriesWithUserId);
 
   if (error) {
     console.error('Error inserting grain entries:', error);

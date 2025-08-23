@@ -45,6 +45,7 @@ export interface GrainEntry {
   is_active: boolean;
   created_at: string;
   updated_at: string;
+  user_id: string;
   crop_classes?: { 
     name: string; 
     code: string;
@@ -65,6 +66,7 @@ export interface GrainEntryInsert {
   cash_price: number | null;
   futures: number | null;
   notes: string;
+  user_id: string;
 }
 
 export interface GrainEntryFilters {
