@@ -23,6 +23,7 @@ export const listEntries = async (
       crop_classes!inner(
         name, 
         code,
+        crop_id,
         master_crops!inner(name, code)
       ),
       master_elevators!inner(name, code),

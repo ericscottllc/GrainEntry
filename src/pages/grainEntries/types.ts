@@ -33,6 +33,7 @@ export interface RegionAssociation {
 export interface GrainEntry {
   id: string;
   date: string;
+  crop_id: string;
   class_id: string;
   elevator_id: string;
   town_id: string;
@@ -55,6 +56,7 @@ export interface GrainEntry {
 
 export interface GrainEntryInsert {
   date: string;
+  crop_id: string;
   class_id: string;
   elevator_id: string;
   town_id: string;
